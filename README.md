@@ -12,11 +12,11 @@ A Setlog-style group video app as an installable web app (PWA). Every hour insid
 
 | Part | Local dev | Production |
 |---|---|---|
-| App | Next.js 16 (`npm run dev`) | Vercel |
+| App | Next.js 16 (`npm run dev`) | Vercel, region `sin1` (Singapore, next to the database; set in `vercel.json`) |
 | Database (metadata only) | PGlite in `.data/pglite`, automatic | Neon Postgres (`DATABASE_URL`) |
 | Video files | `.data/storage` through `/api/dev-storage` | Cloudflare R2; phones upload directly with presigned URLs |
 | Push | Web Push (VAPID keys in `.env.local`) | Same keys, set in Vercel |
-| Hourly scheduler | Call `/api/cron/tick` by hand | cron-job.org or Upstash QStash every 5 min |
+| Hourly scheduler | Call `/api/cron/tick` by hand | cron-job.org or Upstash QStash at :00 and :10 of every hour |
 
 Videos never go into the database and never pass through a Vercel function. A clip is about 0.6 MB, so a group of 6 posting every hour adds roughly 1–2 GB a month. R2's free tier is 10 GB with free downloads. Clips older than `CLIP_RETENTION_DAYS` (default 30) are deleted by the scheduler.
 
@@ -57,7 +57,7 @@ Open http://localhost:3000. The first run creates the local database. `npm run d
 5. **Push keys**: run `npx web-push generate-vapid-keys` and set `NEXT_PUBLIC_VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` in Vercel. Optionally set `VAPID_SUBJECT=mailto:you@example.com`; it defaults to the app's URL. Use new keys for production, not the ones in `.env.local`.
 6. **Scheduler**:
    1. Set `CRON_SECRET` in Vercel to a long random string.
-   2. On [cron-job.org](https://cron-job.org) (free), create a job with URL `https://YOUR-APP.vercel.app/api/cron/tick` that runs every 5 minutes, with request header `Authorization: Bearer <CRON_SECRET>`.
+   2. On [cron-job.org](https://cron-job.org) (free), create a job with URL `https://YOUR-APP.vercel.app/api/cron/tick` that runs **every hour at minutes 0 and 10** (Custom schedule), with request header `Authorization: Bearer <CRON_SECRET>`. Don't run it more often: every call wakes the database, and Neon's free plan only covers about 400 awake hours a month (it sleeps after 5 idle minutes).
    3. Vercel's own free cron only runs once a day, so it can't do this. Upstash QStash schedules work the same way.
 7. **Redeploy** in Vercel (Deployments → ⋯ → Redeploy). `NEXT_PUBLIC_*` values are baked in at build time, so changing them always needs a redeploy.
 

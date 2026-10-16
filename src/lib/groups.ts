@@ -61,6 +61,24 @@ export async function listMembers(groupId: string) {
     .orderBy(asc(memberships.joinedAt));
 }
 
+/** Everything a group screen needs about the group, for a signed-in member. */
+export async function groupInfo(groupId: string, user: { id: string; name: string }) {
+  const { group, notify } = await requireMember(groupId, user.id);
+  return {
+    group: {
+      id: group.id,
+      name: group.name,
+      timezone: group.timezone,
+      firstHour: group.firstHour,
+      lastHour: group.lastHour,
+      inviteCode: group.inviteCode,
+      ownerId: group.ownerId,
+    },
+    members: (await listMembers(groupId)).map((m) => ({ id: m.id, name: m.name })),
+    me: { id: user.id, name: user.name, notify, isOwner: group.ownerId === user.id },
+  };
+}
+
 export async function memberCount(groupId: string) {
   const db = await getDb();
   const [row] = await db.select({ n: count() }).from(memberships).where(eq(memberships.groupId, groupId));

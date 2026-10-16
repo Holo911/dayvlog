@@ -35,6 +35,7 @@ export function GroupTabs({ groupId }: { groupId: string }) {
               <Link
                 key={t.label}
                 href={t.href}
+                prefetch
                 className={cx("flex flex-1 flex-col items-center gap-0.5 pt-2 text-xs", active ? "text-ink" : "text-muted")}
               >
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">

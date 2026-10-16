@@ -12,6 +12,8 @@ import {
   initials,
   LAST_GROUP,
   memberColor,
+  prefetchApi,
+  primeCache,
   useApi,
   useBrowser,
   useNow,
@@ -20,20 +22,36 @@ import {
 } from "@/lib/client";
 import { cityName, clockIn, currentSlot, formatHour, inWindow, nextDropHour, slotOrder, windowHours } from "@/lib/time";
 
+type Today = GroupInfo & { day: string; clips: DayClip[] };
+
 export default function TodayPage() {
   const { id } = useParams<{ id: string }>();
-  const { data: info, error } = useApi<GroupInfo>(`/api/groups/${id}`);
+  // One request for the group and today's clips (the date depends on the group's time zone).
+  const { data: info, error, reload } = useApi<Today>(`/api/groups/${id}/today`, { refreshMs: 60_000 });
+  const day = info;
   const now = useNow(15_000);
   const myZone = useBrowser(deviceTimeZone, null);
   const tz = info?.group.timezone;
   const slot = tz ? currentSlot(now, tz) : null;
-  const { data: day } = useApi<{ day: string; clips: DayClip[] }>(slot ? `/api/groups/${id}/days/${slot.day}` : null, {
-    refreshMs: 60_000,
-  });
+  const stale = Boolean(slot && info && slot.day !== info.day);
 
   useEffect(() => {
     localStorage.setItem(LAST_GROUP, id);
   }, [id]);
+
+  // Hand the data to the other tabs and warm the Days list, so switching tabs is instant.
+  useEffect(() => {
+    if (!info) return;
+    const { group, members, me, day: today, clips } = info;
+    primeCache(`/api/groups/${id}`, { group, members, me });
+    primeCache(`/api/groups/${id}/days/${today}`, { day: today, clips });
+    prefetchApi(`/api/groups/${id}/days`);
+  }, [id, info]);
+
+  // The day rolled over at 04:00 while the app was open.
+  useEffect(() => {
+    if (stale) void reload();
+  }, [stale, reload]);
 
   const byHour = useMemo(() => {
     const map = new Map<number, DayClip[]>();

@@ -34,7 +34,31 @@ export function safeNext(fallback = "/") {
   return next && next.startsWith("/") && !next.startsWith("//") ? next : fallback;
 }
 
-/** Minimal data hook: loads JSON, sends signed-out visitors to /login, refetches on focus. */
+// Last good response per API path, kept for the life of the app. Screens show it
+// instantly (switching tabs feels native) and refresh it in the background.
+const cache = new Map<string, unknown>();
+
+/** Store data another request already returned, so the screen that needs it opens instantly. */
+export function primeCache(path: string, data: unknown) {
+  cache.set(path, data);
+}
+
+const prefetching = new Set<string>();
+
+/** Warm the cache for a screen the user is likely to open next. */
+export function prefetchApi(path: string) {
+  if (cache.has(path) || prefetching.has(path)) return;
+  prefetching.add(path);
+  api(path)
+    .then((data) => cache.set(path, data))
+    .catch(() => {})
+    .finally(() => prefetching.delete(path));
+}
+
+/**
+ * Minimal data hook: shows cached data at once, then loads fresh JSON; sends signed-out
+ * visitors to /login and refetches when the app comes back to the foreground.
+ */
 export function useApi<T>(path: string | null, { refreshMs }: { refreshMs?: number } = {}) {
   // Results are tagged with their path, so a new path never shows the previous page's data.
   const [state, setState] = useState<{ path: string | null; data: T | null; error: string | null }>({
@@ -47,6 +71,7 @@ export function useApi<T>(path: string | null, { refreshMs }: { refreshMs?: numb
     if (!p) return;
     try {
       const data = await api<T>(p);
+      cache.set(p, data);
       setState({ path: p, data, error: null });
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
@@ -68,12 +93,17 @@ export function useApi<T>(path: string | null, { refreshMs }: { refreshMs?: numb
     };
   }, [path, refreshMs, load]);
 
+  const reload = useCallback(() => load(path), [load, path]);
   const current = state.path === path;
+  const cached = path ? ((cache.get(path) as T | undefined) ?? null) : null;
   return {
-    data: current ? state.data : null,
+    data: current && state.data !== null ? state.data : cached,
     error: current ? state.error : null,
-    reload: () => load(path),
-    setData: (data: T) => setState({ path, data, error: null }),
+    reload,
+    setData: (data: T) => {
+      if (path) cache.set(path, data);
+      setState({ path, data, error: null });
+    },
   };
 }
 
