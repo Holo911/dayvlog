@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, ErrorText, Spinner, cx } from "@/components/ui";
+import { describeTrack, listBackLenses, openCamera, setZoom, zoomRange, type Facing, type Lens } from "@/lib/camera";
 import { api, useApi, useNow, type GroupInfo } from "@/lib/client";
 import { cityName, currentSlot, formatHour, inWindow } from "@/lib/time";
 
@@ -23,24 +24,6 @@ const MIME_TYPES = [
 function pickMime() {
   if (typeof MediaRecorder === "undefined") return undefined;
   return MIME_TYPES.find((t) => MediaRecorder.isTypeSupported(t));
-}
-
-async function openCamera(facing: "user" | "environment") {
-  const video: MediaTrackConstraints = {
-    facingMode: { ideal: facing },
-    width: { ideal: 720 },
-    height: { ideal: 1280 },
-    frameRate: { ideal: 30 },
-  };
-  try {
-    return await navigator.mediaDevices.getUserMedia({ video, audio: true });
-  } catch (err) {
-    // Microphone refused but camera may still be allowed: record silent clips.
-    if ((err as Error).name === "NotAllowedError" || (err as Error).name === "NotFoundError") {
-      return navigator.mediaDevices.getUserMedia({ video, audio: false });
-    }
-    throw err;
-  }
 }
 
 /** Dev-only stand-in when there's no camera (e.g. the desktop preview browser). */
@@ -89,7 +72,16 @@ export default function RecordPage() {
 
   const liveRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const [facing, setFacing] = useState<"user" | "environment">("user");
+  const [facing, setFacing] = useState<Facing>("user");
+  const [lensId, setLensId] = useState<string | null>(null);
+  const [lenses, setLenses] = useState<Lens[]>([]);
+  const [activeDevice, setActiveDevice] = useState<string | null>(null);
+  const [zoomCaps, setZoomCaps] = useState<{ min: number; max: number } | null>(null);
+  const [zoom, setZoomValue] = useState(1);
+  const [cameraInfo, setCameraInfo] = useState("");
+  const [showInfo, setShowInfo] = useState(false);
+  const pinch = useRef<{ dist: number; zoom: number } | null>(null);
+  const [restartKey, setRestartKey] = useState(0);
   const [phase, setPhase] = useState<Phase>("starting");
   const [fake, setFake] = useState(false);
   const [clip, setClip] = useState<Clip | null>(null);
@@ -112,7 +104,7 @@ export default function RecordPage() {
         if (!navigator.mediaDevices?.getUserMedia) throw Object.assign(new Error("no camera API"), { name: "NotFoundError" });
         // Dev-only: /record?fake skips the real webcam (used for automated testing).
         if (process.env.NODE_ENV === "development" && window.location.search.includes("fake")) throw new Error("fake");
-        stream = await openCamera(facing);
+        stream = await openCamera(facing, facing === "environment" ? lensId : null);
       } catch (err) {
         if (process.env.NODE_ENV !== "development") {
           if (!cancelled) {
@@ -129,6 +121,16 @@ export default function RecordPage() {
         return;
       }
       streamRef.current = stream;
+      const track = stream.getVideoTracks()[0];
+      const caps = zoomRange(track);
+      setZoomCaps(caps);
+      setZoomValue((track.getSettings() as MediaTrackSettings & { zoom?: number }).zoom ?? caps?.min ?? 1);
+      setCameraInfo(describeTrack(track));
+      setActiveDevice(track.getSettings().deviceId ?? null);
+      if (facing === "environment") {
+        const found = await listBackLenses().catch(() => []);
+        if (!cancelled) setLenses(found);
+      }
       if (liveRef.current) {
         liveRef.current.srcObject = stream;
         await liveRef.current.play().catch(() => {});
@@ -138,9 +140,29 @@ export default function RecordPage() {
     return () => {
       cancelled = true;
     };
-  }, [facing, stopStream]);
+  }, [facing, lensId, restartKey, stopStream]);
 
   useEffect(() => stopStream, [stopStream]);
+
+  function flip() {
+    setLensId(null);
+    setFacing((f) => (f === "user" ? "environment" : "user"));
+  }
+
+  const distance = (t: React.TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+
+  function onTouchStart(e: React.TouchEvent) {
+    if (e.touches.length === 2 && zoomCaps) pinch.current = { dist: distance(e.touches), zoom };
+  }
+
+  function onTouchMove(e: React.TouchEvent) {
+    const track = streamRef.current?.getVideoTracks()[0];
+    if (!pinch.current || e.touches.length !== 2 || !zoomCaps || !track) return;
+    const scaled = pinch.current.zoom * (distance(e.touches) / pinch.current.dist);
+    const next = Math.min(zoomCaps.max, Math.max(zoomCaps.min, scaled));
+    setZoomValue(next);
+    void setZoom(track, next).catch(() => {});
+  }
 
   function record() {
     const stream = streamRef.current;
@@ -180,7 +202,12 @@ export default function RecordPage() {
     setClip(null);
     setCaption("");
     setError(null);
-    setPhase(streamRef.current ? "live" : "fallback");
+    // The iPhone-camera shortcut releases the in-app camera, so bring it back for a retake.
+    if (streamRef.current?.getVideoTracks()[0]?.readyState === "live") setPhase("live");
+    else {
+      setPhase("starting");
+      setRestartKey((k) => k + 1);
+    }
   }
 
   async function pickFile(file: File | undefined) {
@@ -225,17 +252,23 @@ export default function RecordPage() {
   const mirrored = facing === "user" && !fake;
 
   return (
-    <div className="fixed inset-0 overflow-hidden bg-black text-white">
+    <div
+      className="fixed inset-0 overflow-hidden bg-black text-white"
+      style={{ touchAction: "none" }}
+      onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
+      onTouchEnd={() => (pinch.current = null)}
+    >
       <video
         ref={liveRef}
         muted
         playsInline
         autoPlay
-        className={cx("absolute inset-0 size-full object-cover", mirrored && "-scale-x-100", (phase === "review" || phase === "uploading") && "invisible")}
+        className={cx("absolute inset-0 size-full object-contain", mirrored && "-scale-x-100", (phase === "review" || phase === "uploading") && "invisible")}
       />
 
       {clip && (phase === "review" || phase === "uploading") ? (
-        <video src={clip.url} autoPlay loop muted playsInline className="absolute inset-0 size-full object-cover" />
+        <video src={clip.url} autoPlay loop muted playsInline className="absolute inset-0 size-full object-contain" />
       ) : null}
 
       <div className="safe-top absolute inset-x-0 top-0 flex items-center justify-between bg-gradient-to-b from-black/60 to-transparent px-3 pb-6">
@@ -244,18 +277,19 @@ export default function RecordPage() {
             <path d="M6 6l12 12M18 6L6 18" />
           </svg>
         </Link>
-        <div className="text-center leading-tight">
+        <button type="button" onClick={() => setShowInfo((v) => !v)} className="text-center leading-tight">
           <p className="text-lg font-semibold">{slot ? formatHour(slot.hour) : "…"}</p>
           <p className="text-xs text-white/70">
             {info?.group.name}
             {tz ? ` · ${cityName(tz)}` : ""}
             {fake ? " · dev camera" : ""}
           </p>
-        </div>
+          {showInfo && cameraInfo ? <p className="mt-1 max-w-56 break-all text-[10px] text-white/60">{cameraInfo}</p> : null}
+        </button>
         <button
           type="button"
           aria-label="Flip camera"
-          onClick={() => setFacing((f) => (f === "user" ? "environment" : "user"))}
+          onClick={flip}
           disabled={phase !== "live"}
           className="grid size-11 place-items-center rounded-full bg-black/40 disabled:opacity-40"
         >
@@ -278,8 +312,50 @@ export default function RecordPage() {
           </div>
         ) : null}
 
+        {phase === "live" && facing === "environment" && lenses.length > 1 ? (
+          <div className="flex items-center justify-center gap-2">
+            {lenses.map((l) => (
+              <button
+                key={l.deviceId}
+                type="button"
+                onClick={() => setLensId(l.deviceId)}
+                className={cx(
+                  "h-9 min-w-11 rounded-full px-3 text-sm font-semibold",
+                  activeDevice === l.deviceId ? "bg-white text-black" : "bg-black/50 text-white",
+                )}
+              >
+                {l.name}
+              </button>
+            ))}
+          </div>
+        ) : null}
+        {phase === "live" && zoomCaps ? (
+          <p className="text-center text-xs text-white/70">Pinch to zoom · {zoom.toFixed(1)}×</p>
+        ) : null}
+
         {phase === "live" || phase === "recording" ? (
-          <div className="flex h-28 items-center justify-center">
+          <div className="relative flex h-28 items-center justify-center">
+            {phase === "live" ? (
+              <label className="absolute left-2 flex cursor-pointer flex-col items-center gap-1 text-[11px] text-white/80">
+                <span className="grid size-11 place-items-center rounded-full bg-black/50">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M23 7l-7 5 7 5V7z" />
+                    <rect x="1" y="5" width="15" height="14" rx="2" />
+                  </svg>
+                </span>
+                iPhone camera
+                <input
+                  type="file"
+                  accept="video/*"
+                  capture={facing}
+                  className="hidden"
+                  onChange={(e) => {
+                    stopStream();
+                    void pickFile(e.target.files?.[0]);
+                  }}
+                />
+              </label>
+            ) : null}
             <button
               type="button"
               aria-label="Record 2.5 seconds"
@@ -331,7 +407,7 @@ export default function RecordPage() {
         {phase === "fallback" ? (
           <label className="flex h-12 cursor-pointer items-center justify-center rounded-2xl bg-accent font-semibold text-accent-ink">
             Open iPhone camera
-            <input type="file" accept="video/*" capture="user" className="hidden" onChange={(e) => pickFile(e.target.files?.[0])} />
+            <input type="file" accept="video/*" capture={facing} className="hidden" onChange={(e) => pickFile(e.target.files?.[0])} />
           </label>
         ) : null}
       </div>

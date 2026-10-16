@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState, type FormEvent } from "react";
-import { api, safeNext } from "@/lib/client";
+import { api, safeNext, useBrowser } from "@/lib/client";
 import { Button, ErrorText, Field, Input, Logo, Screen } from "./ui";
 
 // Plain email + password on purpose: inside an installed iPhone web app, iCloud Keychain
@@ -33,10 +33,9 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
     }
   }
 
-  const switchHref = () => {
-    if (typeof window === "undefined") return signup ? "/login" : "/signup";
-    return `${signup ? "/login" : "/signup"}${window.location.search}`;
-  };
+  // Keep ?next= when switching between sign-in and sign-up, without a hydration mismatch.
+  const search = useBrowser(() => window.location.search, "");
+  const switchHref = `${signup ? "/login" : "/signup"}${search}`;
 
   return (
     <Screen className="justify-center gap-8 py-8">
@@ -47,7 +46,7 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
       <form method="post" onSubmit={submit} className="flex flex-col gap-4">
         {signup ? (
           <Field label="Your name" hint="Your friends see this under your clips.">
-            <Input name="name" autoComplete="nickname" required maxLength={30} placeholder="e.g. Yui" />
+            <Input name="name" autoComplete="nickname" required maxLength={30} placeholder="First name or nickname" />
           </Field>
         ) : null}
         <Field label="Email">
@@ -69,7 +68,7 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
       </form>
       <p className="text-center text-sm text-muted">
         {signup ? "Already have an account? " : "New here? "}
-        <Link href={switchHref()} className="font-semibold text-ink underline underline-offset-4">
+        <Link href={switchHref} className="font-semibold text-ink underline underline-offset-4">
           {signup ? "Sign in" : "Create an account"}
         </Link>
       </p>

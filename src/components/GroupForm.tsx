@@ -71,7 +71,7 @@ export function GroupForm({
   return (
     <form onSubmit={submit} className="flex flex-col gap-4">
       <Field label="Group name">
-        <Input value={values.name} onChange={(e) => set("name", e.target.value)} maxLength={40} required disabled={readOnly} placeholder="e.g. Shibuya crew" />
+        <Input value={values.name} onChange={(e) => set("name", e.target.value)} maxLength={40} required disabled={readOnly} placeholder="Name your group" />
       </Field>
       <Field label="Time zone" hint="Drop times follow this clock, wherever each person is.">
         <Select value={values.timezone} onChange={(e) => set("timezone", e.target.value)} disabled={readOnly}>
