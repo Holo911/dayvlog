@@ -4,11 +4,12 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, ErrorText, Spinner, cx } from "@/components/ui";
-import { describeTrack, listBackLenses, openCamera, setZoom, zoomRange, type Facing, type Lens } from "@/lib/camera";
+import { describeTrack, openCamera, quickZooms, setZoom, zoomRange, type Facing } from "@/lib/camera";
 import { api, useApi, useNow, type GroupInfo } from "@/lib/client";
 import { cityName, currentSlot, formatHour, inWindow } from "@/lib/time";
 
 const CLIP_MS = 2500;
+const ZOOM_ANIMATION_MS = 180;
 
 type Clip = { blob: Blob; url: string; durationMs: number };
 type Phase = "starting" | "live" | "recording" | "review" | "uploading" | "fallback";
@@ -26,30 +27,35 @@ function pickMime() {
   return MIME_TYPES.find((t) => MediaRecorder.isTypeSupported(t));
 }
 
-/** Dev-only stand-in when there's no camera (e.g. the desktop preview browser). */
+/** Dev-only stand-in when there's no camera (e.g. the desktop preview browser). 3:4 like an iPhone. */
 function fakeCameraStream() {
+  const W = 720;
+  const H = 960;
   const canvas = document.createElement("canvas");
-  canvas.width = 720;
-  canvas.height = 1280;
+  canvas.width = W;
+  canvas.height = H;
   const ctx = canvas.getContext("2d")!;
   const stream = canvas.captureStream(30);
   const track = stream.getVideoTracks()[0];
   const t0 = performance.now();
   const draw = () => {
     const t = (performance.now() - t0) / 1000;
-    const g = ctx.createLinearGradient(0, 0, 720, 1280);
+    const g = ctx.createLinearGradient(0, 0, W, H);
     g.addColorStop(0, `hsl(${(t * 40) % 360} 70% 45%)`);
     g.addColorStop(1, `hsl(${(t * 40 + 120) % 360} 70% 25%)`);
     ctx.fillStyle = g;
-    ctx.fillRect(0, 0, 720, 1280);
+    ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = "#fff";
+    ctx.lineWidth = 8;
+    ctx.strokeRect(4, 4, W - 8, H - 8);
     ctx.fillStyle = "#fff";
     ctx.font = "bold 64px sans-serif";
     ctx.textAlign = "center";
-    ctx.fillText("dev camera", 360, 600);
+    ctx.fillText("dev camera", W / 2, H / 2 - 40);
     ctx.font = "48px monospace";
-    ctx.fillText(new Date().toLocaleTimeString(), 360, 690);
+    ctx.fillText(new Date().toLocaleTimeString(), W / 2, H / 2 + 40);
     ctx.beginPath();
-    ctx.arc(360 + Math.sin(t * 3) * 220, 900, 60, 0, Math.PI * 2);
+    ctx.arc(W / 2 + Math.sin(t * 3) * 220, H * 0.75, 60, 0, Math.PI * 2);
     ctx.fill();
     if (track.readyState === "live") requestAnimationFrame(draw);
   };
@@ -72,18 +78,16 @@ export default function RecordPage() {
 
   const liveRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const pinch = useRef<{ dist: number; zoom: number } | null>(null);
+  const zoomAnimation = useRef(0);
   const [facing, setFacing] = useState<Facing>("user");
-  const [lensId, setLensId] = useState<string | null>(null);
-  const [lenses, setLenses] = useState<Lens[]>([]);
-  const [activeDevice, setActiveDevice] = useState<string | null>(null);
+  const [restartKey, setRestartKey] = useState(0);
+  const [phase, setPhase] = useState<Phase>("starting");
+  const [fake, setFake] = useState(false);
   const [zoomCaps, setZoomCaps] = useState<{ min: number; max: number } | null>(null);
   const [zoom, setZoomValue] = useState(1);
   const [cameraInfo, setCameraInfo] = useState("");
   const [showInfo, setShowInfo] = useState(false);
-  const pinch = useRef<{ dist: number; zoom: number } | null>(null);
-  const [restartKey, setRestartKey] = useState(0);
-  const [phase, setPhase] = useState<Phase>("starting");
-  const [fake, setFake] = useState(false);
   const [clip, setClip] = useState<Clip | null>(null);
   const [progress, setProgress] = useState(0);
   const [caption, setCaption] = useState("");
@@ -104,7 +108,7 @@ export default function RecordPage() {
         if (!navigator.mediaDevices?.getUserMedia) throw Object.assign(new Error("no camera API"), { name: "NotFoundError" });
         // Dev-only: /record?fake skips the real webcam (used for automated testing).
         if (process.env.NODE_ENV === "development" && window.location.search.includes("fake")) throw new Error("fake");
-        stream = await openCamera(facing, facing === "environment" ? lensId : null);
+        stream = await openCamera(facing);
       } catch (err) {
         if (process.env.NODE_ENV !== "development") {
           if (!cancelled) {
@@ -124,13 +128,9 @@ export default function RecordPage() {
       const track = stream.getVideoTracks()[0];
       const caps = zoomRange(track);
       setZoomCaps(caps);
-      setZoomValue((track.getSettings() as MediaTrackSettings & { zoom?: number }).zoom ?? caps?.min ?? 1);
+      // iPhone's back "Dual Wide" camera reports zoom 0.5–10 and starts at the 1× lens.
+      setZoomValue((track.getSettings() as MediaTrackSettings & { zoom?: number }).zoom ?? 1);
       setCameraInfo(describeTrack(track));
-      setActiveDevice(track.getSettings().deviceId ?? null);
-      if (facing === "environment") {
-        const found = await listBackLenses().catch(() => []);
-        if (!cancelled) setLenses(found);
-      }
       if (liveRef.current) {
         liveRef.current.srcObject = stream;
         await liveRef.current.play().catch(() => {});
@@ -140,28 +140,56 @@ export default function RecordPage() {
     return () => {
       cancelled = true;
     };
-  }, [facing, lensId, restartKey, stopStream]);
+  }, [facing, restartKey, stopStream]);
 
-  useEffect(() => stopStream, [stopStream]);
+  useEffect(
+    () => () => {
+      cancelAnimationFrame(zoomAnimation.current);
+      stopStream();
+    },
+    [stopStream],
+  );
 
-  function flip() {
-    setLensId(null);
-    setFacing((f) => (f === "user" ? "environment" : "user"));
+  const liveTrack = () => streamRef.current?.getVideoTracks()[0];
+
+  function applyZoom(value: number) {
+    const track = liveTrack();
+    if (!track || !zoomCaps) return;
+    const z = Math.min(zoomCaps.max, Math.max(zoomCaps.min, value));
+    setZoomValue(z);
+    void setZoom(track, z).catch(() => {});
+  }
+
+  /** The 0.5× / 1× / 2× buttons: a quick glide like the iPhone camera, no camera restart. */
+  function glideTo(target: number) {
+    cancelAnimationFrame(zoomAnimation.current);
+    const from = zoom;
+    let t0: number | null = null;
+    const step = (t: number) => {
+      t0 ??= t;
+      const p = Math.min(1, (t - t0) / ZOOM_ANIMATION_MS);
+      applyZoom(from + (target - from) * (1 - (1 - p) ** 2));
+      if (p < 1) zoomAnimation.current = requestAnimationFrame(step);
+    };
+    zoomAnimation.current = requestAnimationFrame(step);
   }
 
   const distance = (t: React.TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
 
   function onTouchStart(e: React.TouchEvent) {
-    if (e.touches.length === 2 && zoomCaps) pinch.current = { dist: distance(e.touches), zoom };
+    if (e.touches.length === 2 && zoomCaps) {
+      cancelAnimationFrame(zoomAnimation.current);
+      pinch.current = { dist: distance(e.touches), zoom };
+    }
   }
 
   function onTouchMove(e: React.TouchEvent) {
-    const track = streamRef.current?.getVideoTracks()[0];
-    if (!pinch.current || e.touches.length !== 2 || !zoomCaps || !track) return;
-    const scaled = pinch.current.zoom * (distance(e.touches) / pinch.current.dist);
-    const next = Math.min(zoomCaps.max, Math.max(zoomCaps.min, scaled));
-    setZoomValue(next);
-    void setZoom(track, next).catch(() => {});
+    if (!pinch.current || e.touches.length !== 2) return;
+    applyZoom(pinch.current.zoom * (distance(e.touches) / pinch.current.dist));
+  }
+
+  function flip() {
+    setFacing((f) => (f === "user" ? "environment" : "user"));
   }
 
   function record() {
@@ -173,6 +201,7 @@ export default function RecordPage() {
       recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 2_500_000, audioBitsPerSecond: 96_000 });
     } catch {
       setError("This phone can't record in the app. Use the iPhone camera instead.");
+      stopStream();
       setPhase("fallback");
       return;
     }
@@ -202,8 +231,7 @@ export default function RecordPage() {
     setClip(null);
     setCaption("");
     setError(null);
-    // The iPhone-camera shortcut releases the in-app camera, so bring it back for a retake.
-    if (streamRef.current?.getVideoTracks()[0]?.readyState === "live") setPhase("live");
+    if (liveTrack()?.readyState === "live") setPhase("live");
     else {
       setPhase("starting");
       setRestartKey((k) => k + 1);
@@ -250,6 +278,9 @@ export default function RecordPage() {
   const slot = tz ? currentSlot(now, tz) : null;
   const offHours = info && slot ? !inWindow(slot.hour, info.group.firstHour, info.group.lastHour) : false;
   const mirrored = facing === "user" && !fake;
+  const presets = zoomCaps ? quickZooms(zoomCaps) : [];
+  // The highlighted preset is the one you're at or just past, labelled with the exact zoom (like iOS).
+  const activePreset = presets.filter((z) => z <= zoom + 0.01).pop() ?? presets[0];
 
   return (
     <div
@@ -259,6 +290,7 @@ export default function RecordPage() {
       onTouchMove={onTouchMove}
       onTouchEnd={() => (pinch.current = null)}
     >
+      {/* Show the whole frame, exactly what gets recorded and what friends will see. */}
       <video
         ref={liveRef}
         muted
@@ -312,50 +344,29 @@ export default function RecordPage() {
           </div>
         ) : null}
 
-        {phase === "live" && facing === "environment" && lenses.length > 1 ? (
+        {(phase === "live" || phase === "recording") && presets.length > 1 ? (
           <div className="flex items-center justify-center gap-2">
-            {lenses.map((l) => (
-              <button
-                key={l.deviceId}
-                type="button"
-                onClick={() => setLensId(l.deviceId)}
-                className={cx(
-                  "h-9 min-w-11 rounded-full px-3 text-sm font-semibold",
-                  activeDevice === l.deviceId ? "bg-white text-black" : "bg-black/50 text-white",
-                )}
-              >
-                {l.name}
-              </button>
-            ))}
+            {presets.map((z) => {
+              const active = z === activePreset;
+              return (
+                <button
+                  key={z}
+                  type="button"
+                  onClick={() => glideTo(z)}
+                  className={cx(
+                    "grid h-9 min-w-9 place-items-center rounded-full px-2 text-xs font-semibold tabular-nums transition",
+                    active ? "bg-white/90 text-black" : "bg-black/50 text-white",
+                  )}
+                >
+                  {active && Math.abs(zoom - z) > 0.05 ? `${zoom.toFixed(1)}×` : `${z}×`}
+                </button>
+              );
+            })}
           </div>
-        ) : null}
-        {phase === "live" && zoomCaps ? (
-          <p className="text-center text-xs text-white/70">Pinch to zoom · {zoom.toFixed(1)}×</p>
         ) : null}
 
         {phase === "live" || phase === "recording" ? (
-          <div className="relative flex h-28 items-center justify-center">
-            {phase === "live" ? (
-              <label className="absolute left-2 flex cursor-pointer flex-col items-center gap-1 text-[11px] text-white/80">
-                <span className="grid size-11 place-items-center rounded-full bg-black/50">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M23 7l-7 5 7 5V7z" />
-                    <rect x="1" y="5" width="15" height="14" rx="2" />
-                  </svg>
-                </span>
-                iPhone camera
-                <input
-                  type="file"
-                  accept="video/*"
-                  capture={facing}
-                  className="hidden"
-                  onChange={(e) => {
-                    stopStream();
-                    void pickFile(e.target.files?.[0]);
-                  }}
-                />
-              </label>
-            ) : null}
+          <div className="flex h-28 items-center justify-center">
             <button
               type="button"
               aria-label="Record 2.5 seconds"
@@ -404,6 +415,7 @@ export default function RecordPage() {
           </div>
         ) : null}
 
+        {/* Only reached when the in-app camera can't start, so nothing else is holding the camera. */}
         {phase === "fallback" ? (
           <label className="flex h-12 cursor-pointer items-center justify-center rounded-2xl bg-accent font-semibold text-accent-ink">
             Open iPhone camera

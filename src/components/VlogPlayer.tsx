@@ -11,14 +11,33 @@ export type Slot = { hour: number; clips: DayClip[] };
 const MIN_SLOT_MS = 1500;
 const MAX_SLOT_MS = 3200;
 
-/** Columns × rows for n tiles on a portrait screen (Setlog-style split screen). */
-function grid(n: number): [number, number] {
-  if (n <= 1) return [1, 1];
-  if (n <= 3) return [1, n];
-  if (n === 4) return [2, 2];
-  if (n <= 6) return [2, 3];
-  if (n <= 9) return [3, 3];
-  return [3, 4];
+const GAP = 2;
+// Clips are recorded 3:4 (width:height). Tiles keep that shape so nobody gets cropped:
+// what you framed while recording is exactly what your friends see.
+const TILE_ASPECT = 3 / 4;
+
+/** Columns × rows that show n whole clips as large as possible in a w × h stage. */
+function layout(n: number, w: number, h: number) {
+  let best = { cols: 1, tileW: 0, tileH: 0 };
+  for (let cols = 1; cols <= n; cols++) {
+    const rows = Math.ceil(n / cols);
+    const tileW = Math.min((w - GAP * (cols - 1)) / cols, ((h - GAP * (rows - 1)) / rows) * TILE_ASPECT);
+    if (tileW > best.tileW) best = { cols, tileW, tileH: tileW / TILE_ASPECT };
+  }
+  return best;
+}
+
+function useBoxSize() {
+  const ref = useRef<HTMLDivElement>(null);
+  const [box, setBox] = useState({ w: 0, h: 0 });
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) => setBox({ w: entry.contentRect.width, h: entry.contentRect.height }));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return [ref, box] as const;
 }
 
 function slotMs(slot: Slot) {
@@ -26,7 +45,7 @@ function slotMs(slot: Slot) {
   return Math.min(MAX_SLOT_MS, Math.max(MIN_SLOT_MS, longest || 2500));
 }
 
-function Tile({ clip, muted, paused }: { clip: DayClip; muted: boolean; paused: boolean }) {
+function Tile({ clip, muted, paused, width, height }: { clip: DayClip; muted: boolean; paused: boolean; width: number; height: number }) {
   const ref = useRef<HTMLVideoElement>(null);
   useEffect(() => {
     const v = ref.current;
@@ -40,8 +59,8 @@ function Tile({ clip, muted, paused }: { clip: DayClip; muted: boolean; paused: 
     });
   }, [muted, paused]);
   return (
-    <div className="relative overflow-hidden bg-neutral-900">
-      <video ref={ref} src={clip.url} muted playsInline autoPlay preload="auto" className="absolute inset-0 size-full object-cover" />
+    <div className="relative shrink-0 overflow-hidden rounded-md bg-neutral-950" style={{ width, height }}>
+      <video ref={ref} src={clip.url} muted playsInline autoPlay preload="auto" className="absolute inset-0 size-full object-contain" />
       <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-2 pt-6">
         <p className="truncate text-xs font-semibold" style={{ color: memberColor(clip.userId) }}>
           {clip.userName}
@@ -58,6 +77,7 @@ export function VlogPlayer({ slots, startIndex, title, backHref }: { slots: Slot
   const [muted, setMuted] = useState(true);
   const [ended, setEnded] = useState(false);
   const hold = useRef<{ timer?: ReturnType<typeof setTimeout>; held: boolean }>({ held: false });
+  const [stageRef, stage] = useBoxSize();
 
   const slot = slots[index];
   const nextSlot = slots[index + 1];
@@ -102,14 +122,39 @@ export function VlogPlayer({ slots, startIndex, title, backHref }: { slots: Slot
     );
   }
 
-  const [cols, rows] = grid(slot.clips.length);
+  const { cols, tileW, tileH } = layout(slot.clips.length, stage.w, stage.h);
   const people = new Set(slots.flatMap((s) => s.clips.map((c) => c.userId))).size;
   const clipCount = slots.reduce((n, s) => n + s.clips.length, 0);
 
   return (
     <div className="fixed inset-0 select-none overflow-hidden bg-black text-white">
+      <div
+        ref={stageRef}
+        className="absolute inset-x-1 bottom-[max(env(safe-area-inset-bottom),8px)] top-[calc(max(env(safe-area-inset-top),12px)+64px)] flex items-center justify-center"
+        onPointerDown={ended ? undefined : onPointerDown}
+        onPointerUp={ended ? undefined : onPointerUp}
+        onPointerCancel={() => clearTimeout(hold.current.timer)}
+      >
+        {!ended && tileW > 0 ? (
+          <div
+            key={index}
+            className="flex flex-wrap content-center justify-center"
+            style={{ width: cols * tileW + (cols - 1) * GAP, gap: GAP }}
+          >
+            {slot.clips.map((c) => (
+              <Tile key={c.id} clip={c} muted={muted} paused={paused} width={tileW} height={tileH} />
+            ))}
+          </div>
+        ) : null}
+        {!ended ? (
+          <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-black/70 px-4 py-1.5 font-mono text-lg font-semibold tabular-nums backdrop-blur">
+            {formatHour(slot.hour)}
+          </div>
+        ) : null}
+      </div>
+
       {ended ? (
-        <div className="flex h-full flex-col items-center justify-center gap-6 p-8 text-center">
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 bg-black p-8 text-center">
           <p className="text-3xl font-bold">That&apos;s the day</p>
           <p className="text-white/70">
             {title} · {clipCount} clips from {people} {people === 1 ? "person" : "people"}
@@ -130,26 +175,9 @@ export function VlogPlayer({ slots, startIndex, title, backHref }: { slots: Slot
         </div>
       ) : (
         <>
-          <div
-            key={index}
-            className="grid h-full gap-0.5"
-            style={{ gridTemplateColumns: `repeat(${cols}, 1fr)`, gridTemplateRows: `repeat(${rows}, 1fr)` }}
-            onPointerDown={onPointerDown}
-            onPointerUp={onPointerUp}
-            onPointerCancel={() => clearTimeout(hold.current.timer)}
-          >
-            {slot.clips.map((c) => (
-              <Tile key={c.id} clip={c} muted={muted} paused={paused} />
-            ))}
-          </div>
-
           {/* Warm the next hour's videos so the cut is instant. */}
           <div className="hidden" aria-hidden>
             {nextSlot?.clips.map((c) => <video key={c.id} src={c.url} preload="auto" muted playsInline />)}
-          </div>
-
-          <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-black/70 px-4 py-1.5 font-mono text-lg font-semibold tabular-nums backdrop-blur">
-            {formatHour(slot.hour)}
           </div>
 
           <div className="safe-top pointer-events-none absolute inset-x-0 top-0 bg-gradient-to-b from-black/60 to-transparent px-3 pb-8">
