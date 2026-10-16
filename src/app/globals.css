@@ -1,26 +1,43 @@
 @import "tailwindcss";
 
+/* Day Vlog is a camera app: always dark, so clips and faces are the brightest thing on screen. */
+@theme {
+  --color-bg: #0b0b0f;
+  --color-surface: #15151c;
+  --color-raised: #1d1d26;
+  --color-line: #2a2a35;
+  --color-ink: #f4f4f6;
+  --color-muted: #9a9aab;
+  --color-accent: #ff5c5c;
+  --color-accent-ink: #1a0606;
+  --color-ok: #4ade80;
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Segoe UI", Roboto,
+    "Noto Sans JP", sans-serif;
+}
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: dark;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
+html,
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--color-bg);
+  color: var(--color-ink);
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* iOS zooms into inputs smaller than 16px; keep form text at 16px. */
+input,
+select,
+textarea {
+  font-size: 16px;
+}
+
+.safe-top {
+  padding-top: max(env(safe-area-inset-top), 12px);
+}
+.safe-bottom {
+  padding-bottom: max(env(safe-area-inset-bottom), 12px);
 }
