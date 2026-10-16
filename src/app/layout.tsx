@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { EdgeSwipeBack } from "@/components/EdgeSwipeBack";
 import { ServiceWorker } from "@/components/ServiceWorker";
 import "./globals.css";
 
@@ -23,6 +24,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     <html lang="en" className="h-full antialiased">
       <body className="min-h-full flex flex-col font-sans">
         {children}
+        <EdgeSwipeBack />
         <ServiceWorker />
       </body>
     </html>

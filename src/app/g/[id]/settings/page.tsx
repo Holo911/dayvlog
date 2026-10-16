@@ -45,7 +45,7 @@ export default function GroupSettingsPage() {
 
   return (
     <Screen className="gap-4">
-      <TopBar title="Group" back={`/g/${id}`} />
+      <TopBar title="Group settings" back={`/g/${id}`} />
 
       {created ? (
         <Card className="border-accent/40">
