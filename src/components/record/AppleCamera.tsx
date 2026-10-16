@@ -8,6 +8,7 @@ import { pickMime, setCameraMode } from "@/lib/camera";
 import { useNow, type GroupInfo } from "@/lib/client";
 import { cityName, currentSlot, formatHour, inWindow } from "@/lib/time";
 import { uploadClip } from "@/lib/upload";
+import { TrimStrip } from "./TrimStrip";
 
 // Records with Apple's own camera (a file input with `capture`). iOS never asks a Home Screen
 // web app for camera permission this way, unlike the live in-app camera. The app never opens
@@ -210,7 +211,6 @@ export function AppleCamera({ groupId, info }: { groupId: string; info: GroupInf
   const tz = info?.group.timezone;
   const slot = tz ? currentSlot(now, tz) : null;
   const offHours = info && slot ? !inWindow(slot.hour, info.group.firstHour, info.group.lastHour) : false;
-  const maxStart = picked ? Math.max(0, picked.duration - CLIP_S) : 0;
 
   return (
     <div className="fixed inset-0 flex flex-col overflow-hidden bg-black text-white">
@@ -294,25 +294,7 @@ export function AppleCamera({ groupId, info }: { groupId: string; info: GroupInf
 
         {phase === "trim" && picked ? (
           <>
-            {maxStart > 0 ? (
-              <label className="flex flex-col gap-1.5">
-                <span className="flex justify-between text-xs text-white/70">
-                  <span>Slide to pick your 2.5 s</span>
-                  <span className="tabular-nums">
-                    {start.toFixed(1)}–{Math.min(picked.duration, start + CLIP_S).toFixed(1)} s
-                  </span>
-                </span>
-                <input
-                  type="range"
-                  min={0}
-                  max={maxStart}
-                  step={0.05}
-                  value={start}
-                  onChange={(e) => onSlide(Number(e.target.value))}
-                  className="w-full accent-[var(--color-accent)]"
-                />
-              </label>
-            ) : null}
+            <TrimStrip url={picked.url} duration={picked.duration} length={CLIP_S} start={start} onChange={onSlide} videoRef={videoRef} />
             <div className="flex gap-2">
               <Button variant="secondary" onClick={reset} className="bg-white/10">
                 Retake
