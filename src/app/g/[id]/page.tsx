@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo } from "react";
-import { GroupTabs } from "@/components/GroupTabs";
+import { GroupFrame } from "@/components/GroupTabs";
 import { InstallHint } from "@/components/InstallHint";
 import { PushToggle } from "@/components/PushToggle";
 import { DayHero } from "@/components/DayHero";
@@ -68,7 +68,13 @@ export default function TodayPage() {
       </Screen>
     );
   }
-  if (!info || !slot || !tz) return <Loading />;
+  if (!info || !slot || !tz) {
+    return (
+      <GroupFrame groupId={id}>
+        <Loading />
+      </GroupFrame>
+    );
+  }
 
   const { group, members, me } = info;
   const open = inWindow(slot.hour, group.firstHour, group.lastHour);
@@ -109,7 +115,7 @@ export default function TodayPage() {
   );
 
   return (
-    <Screen className="gap-4">
+    <GroupFrame groupId={id} action={recordBar}>
       <TopBar
         back="/?home"
         title={group.name}
@@ -201,7 +207,6 @@ export default function TodayPage() {
         })}
       </section>
 
-      <GroupTabs groupId={id} action={recordBar} />
-    </Screen>
+    </GroupFrame>
   );
 }

@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { GroupTabs } from "@/components/GroupTabs";
-import { Card, Loading, Screen, TopBar } from "@/components/ui";
+import { GroupFrame } from "@/components/GroupTabs";
+import { Card, Loading, TopBar } from "@/components/ui";
 import { useApi, type GroupInfo } from "@/lib/client";
 import { addDays, currentSlot, dayLabel } from "@/lib/time";
 
@@ -14,13 +14,19 @@ export default function CalendarPage() {
   const { data: info } = useApi<GroupInfo>(`/api/groups/${id}`);
   const { data } = useApi<{ days: Day[] }>(`/api/groups/${id}/days`);
 
-  if (!info || !data) return <Loading />;
+  if (!info || !data) {
+    return (
+      <GroupFrame groupId={id}>
+        <Loading />
+      </GroupFrame>
+    );
+  }
   const today = currentSlot(new Date(), info.group.timezone).day;
   const yesterday = addDays(today, -1);
   const name = (d: string) => (d === today ? "Today" : d === yesterday ? "Yesterday" : dayLabel(d, { weekday: "long" }));
 
   return (
-    <Screen className="gap-3">
+    <GroupFrame groupId={id}>
       <TopBar title="Days" back={`/g/${id}`} />
       {data.days.length === 0 ? (
         <p className="py-8 text-center text-muted">No clips yet. After the first drop, every day shows up here as a vlog.</p>
@@ -42,7 +48,6 @@ export default function CalendarPage() {
           </Card>
         </Link>
       ))}
-      <GroupTabs groupId={id} />
-    </Screen>
+    </GroupFrame>
   );
 }

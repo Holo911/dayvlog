@@ -4,8 +4,8 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
 import { GroupForm } from "@/components/GroupForm";
-import { GroupTabs } from "@/components/GroupTabs";
-import { Button, Card, ErrorText, Loading, Screen, Toggle, TopBar } from "@/components/ui";
+import { GroupFrame } from "@/components/GroupTabs";
+import { Button, Card, ErrorText, Loading, Toggle, TopBar } from "@/components/ui";
 import { api, initials, LAST_GROUP, memberColor, useApi, useBrowser, type GroupInfo } from "@/lib/client";
 
 async function share(title: string, url: string) {
@@ -30,7 +30,13 @@ export default function GroupSettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [resetLink, setResetLink] = useState<{ name: string; url: string } | null>(null);
 
-  if (!info) return <Loading />;
+  if (!info) {
+    return (
+      <GroupFrame groupId={id}>
+        <Loading />
+      </GroupFrame>
+    );
+  }
   const { group, members, me } = info;
   const inviteUrl = `${window.location.origin}/join/${group.inviteCode}`;
 
@@ -44,7 +50,7 @@ export default function GroupSettingsPage() {
   }
 
   return (
-    <Screen className="gap-4">
+    <GroupFrame groupId={id}>
       <TopBar title="Group settings" back={`/g/${id}`} />
 
       {created ? (
@@ -189,7 +195,6 @@ export default function GroupSettingsPage() {
       <Link href="/settings" className="py-2 text-center text-sm text-muted underline underline-offset-4">
         Account &amp; notifications
       </Link>
-      <GroupTabs groupId={id} />
-    </Screen>
+    </GroupFrame>
   );
 }

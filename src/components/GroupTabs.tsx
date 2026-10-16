@@ -17,8 +17,25 @@ const icons = {
   ),
 };
 
-/** Bottom bar for a group. `action` (e.g. the Record button) sits pinned just above the tabs. */
-export function GroupTabs({ groupId, action }: { groupId: string; action?: ReactNode }) {
+/**
+ * Full-screen frame for the tabbed group screens: only the middle scrolls, and the bottom bar
+ * is an ordinary part of the frame. Installed iPhone web apps misplace `position: fixed` bars
+ * on pages that don't scroll (the bar jumped up on the short Days tab), so the document
+ * itself never scrolls here.
+ */
+export function GroupFrame({ groupId, action, children }: { groupId: string; action?: ReactNode; children: ReactNode }) {
+  return (
+    <div className="fixed inset-x-0 top-0 flex h-screen flex-col">
+      <div className="flex-1 overflow-y-auto overscroll-contain">
+        <main className="safe-top mx-auto flex w-full max-w-md flex-col gap-4 px-4 pb-6">{children}</main>
+      </div>
+      <GroupTabs groupId={groupId} action={action} />
+    </div>
+  );
+}
+
+/** Bottom bar for a group. `action` (e.g. the Record button) sits just above the tabs. */
+function GroupTabs({ groupId, action }: { groupId: string; action?: ReactNode }) {
   const path = usePathname();
   const tabs = [
     { href: "/?home", match: "/", label: "Groups", icon: icons.groups },
@@ -28,8 +45,7 @@ export function GroupTabs({ groupId, action }: { groupId: string; action?: React
   ];
   return (
     <>
-      <div className={action ? "h-40" : "h-20"} aria-hidden />
-      <nav className="safe-bottom fixed inset-x-0 bottom-0 z-10 border-t border-line bg-bg/90 backdrop-blur">
+      <nav className="safe-bottom shrink-0 border-t border-line bg-bg">
         {action ? <div className="mx-auto max-w-md px-4 pt-3">{action}</div> : null}
         <div className="mx-auto flex max-w-md">
           {tabs.map((t) => {
