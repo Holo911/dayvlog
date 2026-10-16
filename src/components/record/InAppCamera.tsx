@@ -535,38 +535,74 @@ export function InAppCamera({ groupId: id, info }: { groupId: string; info: Grou
         </div>
       ) : null}
 
-      {/* Caption and posting happen upright again, so typing is normal. */}
+      {/* Caption and posting: works upright, and sideways (clip left, controls right) so Post is
+          never pushed off the screen while you're still holding the phone sideways. */}
       {reviewing && clip ? (
-        <div className="safe-top safe-bottom absolute inset-0 z-20 flex flex-col bg-black px-4">
-          <div className="flex items-center justify-between pb-3">
-            {closeButton}
-            {hourLabel}
-            <span className="size-11" />
-          </div>
-          <div className="flex flex-1 items-center justify-center">
-            <div className="relative aspect-video w-full max-w-2xl overflow-hidden rounded-2xl bg-neutral-900">
-              <video src={clip.url} autoPlay loop muted playsInline className="absolute inset-0 size-full object-cover" />
+        landscapePage ? (
+          <div
+            className="absolute inset-0 z-20 flex gap-4 bg-black py-3"
+            style={{ paddingLeft: "max(env(safe-area-inset-left), 12px)", paddingRight: "max(env(safe-area-inset-right), 12px)" }}
+          >
+            <div className="flex min-w-0 flex-1 items-center justify-center">
+              <div className="relative aspect-video max-h-full w-full overflow-hidden rounded-2xl bg-neutral-900">
+                <video src={clip.url} autoPlay loop muted playsInline className="absolute inset-0 size-full object-cover" />
+              </div>
+            </div>
+            <div className="flex w-64 shrink-0 flex-col gap-3">
+              <div className="flex items-start justify-between gap-2">
+                {closeButton}
+                {hourLabel}
+              </div>
+              <input
+                value={caption}
+                onChange={(e) => setCaption(e.target.value)}
+                maxLength={60}
+                placeholder="Add a caption (optional)"
+                className="h-11 rounded-xl border border-white/20 bg-black/50 px-3 text-white outline-none placeholder:text-white/50"
+              />
+              <ErrorText>{error}</ErrorText>
+              <div className="mt-auto flex flex-col gap-2">
+                <Button onClick={post} busy={phase === "uploading"}>
+                  Post
+                </Button>
+                <Button variant="secondary" onClick={retake} disabled={phase === "uploading"} className="bg-white/10">
+                  Retake
+                </Button>
+              </div>
             </div>
           </div>
-          <div className="mx-auto flex w-full max-w-2xl flex-col gap-3 pt-3">
-            <ErrorText>{error}</ErrorText>
-            <input
-              value={caption}
-              onChange={(e) => setCaption(e.target.value)}
-              maxLength={60}
-              placeholder="Add a caption (optional)"
-              className="h-12 rounded-xl border border-white/20 bg-black/50 px-3 text-white outline-none placeholder:text-white/50"
-            />
-            <div className="flex gap-2">
-              <Button variant="secondary" onClick={retake} disabled={phase === "uploading"} className="bg-white/10">
-                Retake
-              </Button>
-              <Button onClick={post} busy={phase === "uploading"}>
-                Post
-              </Button>
+        ) : (
+          <div className="safe-top safe-bottom absolute inset-0 z-20 flex flex-col bg-black px-4">
+            <div className="flex items-center justify-between pb-3">
+              {closeButton}
+              {hourLabel}
+              <span className="size-11" />
+            </div>
+            <div className="flex flex-1 items-center justify-center">
+              <div className="relative aspect-video w-full max-w-2xl overflow-hidden rounded-2xl bg-neutral-900">
+                <video src={clip.url} autoPlay loop muted playsInline className="absolute inset-0 size-full object-cover" />
+              </div>
+            </div>
+            <div className="mx-auto flex w-full max-w-2xl flex-col gap-3 pt-3">
+              <ErrorText>{error}</ErrorText>
+              <input
+                value={caption}
+                onChange={(e) => setCaption(e.target.value)}
+                maxLength={60}
+                placeholder="Add a caption (optional)"
+                className="h-12 rounded-xl border border-white/20 bg-black/50 px-3 text-white outline-none placeholder:text-white/50"
+              />
+              <div className="flex gap-2">
+                <Button variant="secondary" onClick={retake} disabled={phase === "uploading"} className="bg-white/10">
+                  Retake
+                </Button>
+                <Button onClick={post} busy={phase === "uploading"}>
+                  Post
+                </Button>
+              </div>
             </div>
           </div>
-        </div>
+        )
       ) : null}
     </div>
   );
