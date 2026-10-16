@@ -1,6 +1,6 @@
 # Day Vlog
 
-A Setlog-style group video app as an installable web app (PWA). Every hour inside the group's drop window, everyone gets a notification and films a 2.5-second clip. Each hour becomes a split-screen grid of everyone's clips, and the day plays back as one vlog. Days reset at 04:00.
+A Setlog-style group video app as an installable web app (PWA). Every hour inside the group's drop window, everyone gets a notification and films a 2.5-second horizontal clip. Each hour becomes a split screen of everyone's clips stacked full width (uncropped), and the day plays back as one vlog. Days reset at 04:00.
 
 - **Groups** of up to 12 people join with an invite code or link.
 - **Hourly drops** run between a first and a last hour (default 06:00–22:00) in the **group's time zone**, which is set per group. Nobody gets notifications at night. Settings show the drop hours converted to your own clock when you're in another zone.
@@ -18,7 +18,7 @@ A Setlog-style group video app as an installable web app (PWA). Every hour insid
 | Push | Web Push (VAPID keys in `.env.local`) | Same keys, set in Vercel |
 | Hourly scheduler | Call `/api/cron/tick` by hand | cron-job.org or Upstash QStash at :00 and :10 of every hour |
 
-Videos never go into the database and never pass through a Vercel function. A clip is about 0.6 MB, so a group of 6 posting every hour adds roughly 1–2 GB a month. R2's free tier is 10 GB with free downloads. Clips older than `CLIP_RETENTION_DAYS` (default 30) are deleted by the scheduler.
+Videos never go into the database and never pass through a Vercel function. A clip is a 1280×720 MP4 of about 1.5 MB, so a group of 6 posting every hour adds roughly 2–4 GB a month (with the 30-day cleanup that's the most ever stored). R2's free tier is 10 GB with free downloads. Clips older than `CLIP_RETENTION_DAYS` (default 30) are deleted by the scheduler.
 
 ## Local development
 

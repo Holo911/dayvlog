@@ -4,14 +4,16 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, ErrorText, Spinner, cx } from "@/components/ui";
-import { describeTrack, openCamera, pickMime, quickZooms, setCameraMode, setZoom, zoomRange, type Facing } from "@/lib/camera";
+import { describeTrack, openCamera, quickZooms, setCameraMode, setZoom, zoomRange, type Facing } from "@/lib/camera";
+import { createClipRecorder } from "@/lib/clipFormat";
 import { useNow, type GroupInfo } from "@/lib/client";
 import { cityName, currentSlot, formatHour, inWindow } from "@/lib/time";
 import { uploadClip } from "@/lib/upload";
 
-// The in-app camera: live preview, 2.5 s auto-stop, zoom presets. On iPhone, Home Screen web
-// apps can't keep camera permission, so this asks for it again most times; the Apple camera
-// mode (AppleCamera.tsx) avoids that.
+// The in-app camera: a horizontal viewfinder, exactly 2.5 s, zoom presets. It records the
+// horizontal 16:9 band shown in the viewfinder (see lib/clipFormat.ts). On iPhone, Home Screen
+// web apps can't keep camera permission, so this asks for it again most times; the Apple
+// camera mode (AppleCamera.tsx) avoids that.
 
 const CLIP_MS = 2500;
 const ZOOM_ANIMATION_MS = 180;
@@ -184,36 +186,32 @@ export function InAppCamera({ groupId: id, info }: { groupId: string; info: Grou
 
   function record() {
     const stream = streamRef.current;
-    if (!stream || phase !== "live") return;
-    const mimeType = pickMime();
-    let recorder: MediaRecorder;
-    try {
-      recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 2_500_000, audioBitsPerSecond: 96_000 });
-    } catch {
+    const video = liveRef.current;
+    if (!stream || !video || phase !== "live") return;
+    const rec = createClipRecorder(stream.getAudioTracks());
+    if (!rec) {
       setError("This phone can't record in the app. Use the iPhone camera instead.");
       stopStream();
       setPhase("fallback");
       return;
     }
-    const chunks: Blob[] = [];
+    rec.draw(video);
+    rec.start();
     const t0 = performance.now();
-    recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
-    recorder.onstop = () => {
-      const type = recorder.mimeType || mimeType || "video/mp4";
-      const blob = new Blob(chunks, { type });
-      setClip({ blob, url: URL.createObjectURL(blob), durationMs: Math.round(performance.now() - t0) });
-      setPhase("review");
-      setProgress(0);
-    };
-    recorder.start();
     setPhase("recording");
     const tick = () => {
+      rec.draw(video);
       const p = Math.min(1, (performance.now() - t0) / CLIP_MS);
       setProgress(p);
       if (p < 1) requestAnimationFrame(tick);
-      else if (recorder.state === "recording") recorder.stop();
+      else rec.stop();
     };
     requestAnimationFrame(tick);
+    void rec.finished.then((blob) => {
+      setClip({ blob, url: URL.createObjectURL(blob), durationMs: Math.round(performance.now() - t0) });
+      setPhase("review");
+      setProgress(0);
+    });
   }
 
   function retake() {
@@ -252,27 +250,14 @@ export function InAppCamera({ groupId: id, info }: { groupId: string; info: Grou
 
   return (
     <div
-      className="fixed inset-0 overflow-hidden bg-black text-white"
+      className="fixed inset-0 flex flex-col overflow-hidden bg-black text-white"
       style={{ touchAction: "none" }}
       onTouchStart={onTouchStart}
       onTouchMove={onTouchMove}
       onTouchEnd={() => (pinch.current = null)}
     >
-      {/* Show the whole frame, exactly what gets recorded and what friends will see. */}
-      <video
-        ref={liveRef}
-        muted
-        playsInline
-        autoPlay
-        className={cx("absolute inset-0 size-full object-contain", mirrored && "-scale-x-100", (phase === "review" || phase === "uploading") && "invisible")}
-      />
-
-      {clip && (phase === "review" || phase === "uploading") ? (
-        <video src={clip.url} autoPlay loop muted playsInline className="absolute inset-0 size-full object-contain" />
-      ) : null}
-
-      <div className="safe-top absolute inset-x-0 top-0 flex items-center justify-between bg-gradient-to-b from-black/60 to-transparent px-3 pb-6">
-        <Link href={`/g/${id}`} aria-label="Close" className="grid size-11 place-items-center rounded-full bg-black/40">
+      <div className="safe-top flex shrink-0 items-center justify-between px-3 pb-3">
+        <Link href={`/g/${id}`} aria-label="Close" className="grid size-11 place-items-center rounded-full bg-white/10">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
             <path d="M6 6l12 12M18 6L6 18" />
           </svg>
@@ -291,7 +276,7 @@ export function InAppCamera({ groupId: id, info }: { groupId: string; info: Grou
           aria-label="Flip camera"
           onClick={flip}
           disabled={phase !== "live"}
-          className="grid size-11 place-items-center rounded-full bg-black/40 disabled:opacity-40"
+          className="grid size-11 place-items-center rounded-full bg-white/10 disabled:opacity-40"
         >
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M20 7h-3l-2-3H9L7 7H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1z" />
@@ -300,17 +285,32 @@ export function InAppCamera({ groupId: id, info }: { groupId: string; info: Grou
         </button>
       </div>
 
-      <div className="safe-bottom absolute inset-x-0 bottom-0 flex flex-col gap-3 bg-gradient-to-t from-black/80 to-transparent px-4 pt-10">
+      {/* The horizontal viewfinder: exactly the band that gets recorded, as friends will see it. */}
+      <div className="flex flex-1 items-center justify-center">
+        <div className="relative aspect-video w-full overflow-hidden bg-neutral-900">
+          <video
+            ref={liveRef}
+            muted
+            playsInline
+            autoPlay
+            className={cx("absolute inset-0 size-full object-cover", mirrored && "-scale-x-100", (phase === "review" || phase === "uploading") && "invisible")}
+          />
+          {clip && (phase === "review" || phase === "uploading") ? (
+            <video src={clip.url} autoPlay loop muted playsInline className="absolute inset-0 size-full object-cover" />
+          ) : null}
+          {phase === "starting" ? (
+            <div className="absolute inset-0 grid place-items-center">
+              <Spinner />
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="safe-bottom flex shrink-0 flex-col gap-3 px-4 pt-3">
         {offHours && phase === "live" ? (
           <p className="text-center text-sm text-white/80">Outside drop hours, but it still goes into today&apos;s vlog.</p>
         ) : null}
         <ErrorText>{error}</ErrorText>
-
-        {phase === "starting" ? (
-          <div className="grid h-24 place-items-center">
-            <Spinner />
-          </div>
-        ) : null}
 
         {(phase === "live" || phase === "recording") && presets.length > 1 ? (
           <div className="flex items-center justify-center gap-2">
@@ -323,7 +323,7 @@ export function InAppCamera({ groupId: id, info }: { groupId: string; info: Grou
                   onClick={() => glideTo(z)}
                   className={cx(
                     "grid h-9 min-w-9 place-items-center rounded-full px-2 text-xs font-semibold tabular-nums transition",
-                    active ? "bg-white/90 text-black" : "bg-black/50 text-white",
+                    active ? "bg-white/90 text-black" : "bg-white/10 text-white",
                   )}
                 >
                   {active && Math.abs(zoom - z) > 0.05 ? `${zoom.toFixed(1)}×` : `${z}×`}
@@ -373,7 +373,7 @@ export function InAppCamera({ groupId: id, info }: { groupId: string; info: Grou
               className="h-12 rounded-xl border border-white/20 bg-black/50 px-3 text-white placeholder:text-white/50 outline-none"
             />
             <div className="flex gap-2">
-              <Button variant="secondary" onClick={retake} disabled={phase === "uploading"} className="bg-black/50">
+              <Button variant="secondary" onClick={retake} disabled={phase === "uploading"} className="bg-white/10">
                 Retake
               </Button>
               <Button onClick={post} busy={phase === "uploading"}>

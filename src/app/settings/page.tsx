@@ -9,14 +9,14 @@ import { api, LAST_GROUP, useApi, type Me } from "@/lib/client";
 
 const CAMERA_OPTIONS: { mode: CameraMode; title: string; text: string }[] = [
   {
-    mode: "apple",
-    title: "iPhone camera",
-    text: "Opens Apple's camera, so the app never asks for camera permission. You film a few seconds and pick the best 2.5 s.",
-  },
-  {
     mode: "inapp",
     title: "In-app camera",
-    text: "Records 2.5 s right inside the app. On iPhone it asks for camera permission again most times.",
+    text: "Records exactly 2.5 s in a horizontal frame, right inside the app. On iPhone it asks for camera permission most times.",
+  },
+  {
+    mode: "apple",
+    title: "iPhone camera",
+    text: "Opens Apple's camera, so the app never asks for permission. You stop it yourself, pick 2.5 s, and it's cropped to horizontal.",
   },
 ];
 

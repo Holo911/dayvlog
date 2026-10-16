@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { Button, ErrorText, Spinner } from "@/components/ui";
-import { pickMime, setCameraMode } from "@/lib/camera";
+import { setCameraMode } from "@/lib/camera";
+import { createClipRecorder } from "@/lib/clipFormat";
 import { useNow, type GroupInfo } from "@/lib/client";
 import { cityName, currentSlot, formatHour, inWindow } from "@/lib/time";
 import { uploadClip } from "@/lib/upload";
@@ -14,11 +15,9 @@ import { TrimStrip } from "./TrimStrip";
 // web app for camera permission this way, unlike the live in-app camera. The app never opens
 // the camera itself here: holding it while Apple's camera opens froze that on a blurred frame.
 // Afterwards you pick 2.5 s of the video, and the app re-records exactly that part into a
-// 3:4 clip (canvas + MediaRecorder), so it matches everyone else's clips.
+// horizontal 16:9 clip (lib/clipFormat.ts), so it matches everyone else's clips.
 
 const CLIP_S = 2.5;
-const OUT_W = 720;
-const OUT_H = 960;
 const MAX_RAW_BYTES = 25 * 1024 * 1024;
 
 type Picked = { url: string; file: File; duration: number };
@@ -108,15 +107,6 @@ export function AppleCamera({ groupId, info }: { groupId: string; info: GroupInf
   function keepSegment() {
     const v = videoRef.current;
     if (!v || !picked) return;
-    const mimeType = pickMime();
-    const canvas = document.createElement("canvas");
-    canvas.width = OUT_W;
-    canvas.height = OUT_H;
-    const ctx = canvas.getContext("2d");
-    if (!mimeType || !ctx || typeof canvas.captureStream !== "function" || !v.videoWidth) {
-      void keepOriginal();
-      return;
-    }
 
     // Route the video's sound into the recording (not to the speaker). Created once per video.
     if (!audioRef.current) {
@@ -132,30 +122,21 @@ export function AppleCamera({ groupId, info }: { groupId: string; info: GroupInf
     }
     void audioRef.current?.ac.resume();
 
-    const stream = canvas.captureStream(30);
-    audioRef.current?.dest.stream.getAudioTracks().forEach((t) => stream.addTrack(t));
-    const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 2_500_000, audioBitsPerSecond: 96_000 });
-    const chunks: Blob[] = [];
-    recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
-
-    // Centre crop to 3:4, the same framing the trim preview shows.
-    const scale = Math.max(OUT_W / v.videoWidth, OUT_H / v.videoHeight);
-    const sw = OUT_W / scale;
-    const sh = OUT_H / scale;
-    const sx = (v.videoWidth - sw) / 2;
-    const sy = (v.videoHeight - sh) / 2;
-    const draw = () => ctx.drawImage(v, sx, sy, sw, sh, 0, 0, OUT_W, OUT_H);
+    const rec = v.videoWidth ? createClipRecorder(audioRef.current?.dest.stream.getAudioTracks() ?? []) : null;
+    if (!rec) {
+      void keepOriginal();
+      return;
+    }
 
     const length = Math.min(CLIP_S, picked.duration - start);
     const end = start + length;
     let t0 = 0;
-    recorder.onstop = () => {
+    void rec.finished.then((blob) => {
       v.pause();
       v.muted = true;
-      const blob = new Blob(chunks, { type: recorder.mimeType || mimeType });
       setClip({ blob, url: URL.createObjectURL(blob), durationMs: Math.round(performance.now() - t0) });
       setPhase("review");
-    };
+    });
 
     looping.current = false;
     v.muted = !audioRef.current;
@@ -165,16 +146,13 @@ export function AppleCamera({ groupId, info }: { groupId: string; info: GroupInf
       "seeked",
       () => {
         void v.play().catch(() => {});
-        draw();
-        recorder.start();
+        rec.draw(v);
+        rec.start();
         t0 = performance.now();
         const tick = () => {
-          draw();
+          rec.draw(v);
           setProgress(Math.min(1, (v.currentTime - start) / length));
-          if (v.currentTime >= end || v.ended) {
-            if (recorder.state === "recording") recorder.stop();
-            return;
-          }
+          if (v.currentTime >= end || v.ended) return rec.stop();
           requestAnimationFrame(tick);
         };
         requestAnimationFrame(tick);
@@ -254,7 +232,7 @@ export function AppleCamera({ groupId, info }: { groupId: string; info: GroupInf
         {phase === "loading" ? <Spinner /> : null}
 
         {picked && (phase === "trim" || phase === "rendering") ? (
-          <div className="relative aspect-[3/4] max-h-[60dvh] w-full max-w-sm overflow-hidden rounded-2xl bg-neutral-900">
+          <div className="relative aspect-video w-full overflow-hidden rounded-2xl bg-neutral-900">
             <video
               key={picked.url}
               ref={videoRef}
@@ -283,7 +261,7 @@ export function AppleCamera({ groupId, info }: { groupId: string; info: GroupInf
         ) : null}
 
         {clip && (phase === "review" || phase === "uploading") ? (
-          <div className="relative aspect-[3/4] max-h-[60dvh] w-full max-w-sm overflow-hidden rounded-2xl bg-neutral-900">
+          <div className="relative aspect-video w-full overflow-hidden rounded-2xl bg-neutral-900">
             <video src={clip.url} autoPlay loop muted playsInline className="absolute inset-0 size-full object-cover" />
           </div>
         ) : null}

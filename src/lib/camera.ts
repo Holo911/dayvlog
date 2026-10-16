@@ -5,14 +5,14 @@
 // so lens changes are just zoom values and happen without restarting the camera.
 
 import { useSyncExternalStore } from "react";
-import { isIos } from "./client";
 
 export type Facing = "user" | "environment";
 
 // Which camera Record opens, remembered per device:
-// - "apple": Apple's own camera through a file input. iOS never asks a Home Screen web app
-//   for camera permission this way; the clip is trimmed to 2.5 s and framed 3:4 afterwards.
-// - "inapp": live preview inside the app; iOS asks for camera permission again most times.
+// - "inapp" (default): horizontal viewfinder inside the app, exactly 2.5 s. On iPhone, iOS
+//   asks for camera permission again most times (Home Screen web apps can't keep it).
+// - "apple": Apple's own camera through a file input, which never asks for permission; you
+//   then pick 2.5 s and the app crops it to the same horizontal clip.
 export type CameraMode = "apple" | "inapp";
 const MODE_KEY = "dayvlog:cameraMode";
 const modeListeners = new Set<() => void>();
@@ -24,7 +24,7 @@ export function getCameraMode(): CameraMode {
   } catch {
     // Storage unavailable: fall through to the default.
   }
-  return isIos() ? "apple" : "inapp";
+  return "inapp";
 }
 
 export function setCameraMode(mode: CameraMode) {
@@ -61,12 +61,12 @@ export function pickMime() {
 }
 
 export async function openCamera(facing: Facing) {
-  // Ask for a 3:4 portrait frame: on phones 4:3 is the sensor's full view, while 16:9
-  // video crops the sides away and looks zoomed in.
+  // Ask for a 3:4 portrait frame (the sensor's full view on phones), 1440 px wide: the clip is
+  // a horizontal 16:9 band across the full width, so width is what gives it detail.
   const video: MediaTrackConstraints = {
     facingMode: { ideal: facing },
-    width: { ideal: 1080 },
-    height: { ideal: 1440 },
+    width: { ideal: 1440 },
+    height: { ideal: 1920 },
     frameRate: { ideal: 30 },
   };
   try {

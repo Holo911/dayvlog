@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useClipUrls } from "@/lib/clipCache";
+import { CLIP_ASPECT } from "@/lib/clipFormat";
 import { memberColor, type DayClip } from "@/lib/client";
 import { formatHour } from "@/lib/time";
 import { Spinner, cx } from "./ui";
@@ -16,25 +17,20 @@ const MAX_SLOT_MS = 3200;
 const LOOKAHEAD = 2;
 
 export const GAP = 2;
-// Clips are recorded 3:4 (width:height).
-export const TILE_ASPECT = 3 / 4;
+// Clips are horizontal 16:9 (lib/clipFormat.ts).
+export const TILE_ASPECT = CLIP_ASPECT;
 
 /**
- * Split-screen layout: tiles always span the full width (so 2 people are 2 full-width tiles).
- * A tile is never taller than a whole 3:4 clip; when the height doesn't fit, it shows a
- * centred slice of the clip, the way split-screen video apps do. Among the column counts,
- * pick the one with the biggest tiles, penalised for how much of each clip gets cut.
+ * Setlog-style split screen: horizontal clips stacked one above the other, never cropped.
+ * Up to 3 people that's full width edge to edge; with more, tiles shrink a little to fit
+ * whole, and big groups go to two columns. Picks the column count with the biggest tiles.
  */
 export function layout(n: number, w: number, h: number) {
-  let best = { cols: 1, tileW: 0, tileH: 0, score: -1 };
+  let best = { cols: 1, tileW: 0, tileH: 0 };
   for (let cols = 1; cols <= Math.max(1, n); cols++) {
     const rows = Math.ceil(n / cols);
-    const tileW = (w - GAP * (cols - 1)) / cols;
-    const tileH = Math.min(tileW / TILE_ASPECT, (h - GAP * (rows - 1)) / rows);
-    if (tileW <= 0 || tileH <= 0) continue;
-    const shown = tileH / (tileW / TILE_ASPECT); // share of the clip's height that's visible
-    const score = tileW * tileH * shown * shown;
-    if (score > best.score) best = { cols, tileW, tileH, score };
+    const tileW = Math.min((w - GAP * (cols - 1)) / cols, ((h - GAP * (rows - 1)) / rows) * TILE_ASPECT);
+    if (tileW > best.tileW) best = { cols, tileW, tileH: tileW / TILE_ASPECT };
   }
   return best;
 }
@@ -108,7 +104,7 @@ function Tile({ clip, src, active, muted, paused, width, height, onDecoded, onPl
         preload="auto"
         onLoadedData={onDecoded}
         onPlaying={() => active && onPlaying()}
-        className="absolute inset-0 size-full object-cover"
+        className="absolute inset-0 size-full object-contain"
       />
       {/* Name and the whole caption (max 60 characters), wrapped rather than cut off. */}
       <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent px-2.5 pb-2 pt-8">
