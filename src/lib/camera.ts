@@ -58,9 +58,24 @@ export function setZoom(track: MediaStreamTrack, zoom: number) {
   return track.applyConstraints({ advanced: [{ zoom } as MediaTrackConstraintSet] });
 }
 
+/** Whether the browser lets us switch this camera's light on (the back camera's flash). */
+export function torchSupported(track: MediaStreamTrack) {
+  const caps = track.getCapabilities?.() as (MediaTrackCapabilities & { torch?: boolean }) | undefined;
+  return Boolean(caps?.torch);
+}
+
+export function setTorch(track: MediaStreamTrack, on: boolean) {
+  return track.applyConstraints({ advanced: [{ torch: on } as MediaTrackConstraintSet] });
+}
+
 /** One line describing the live camera, shown when you tap the hour label (for debugging on a phone). */
 export function describeTrack(track: MediaStreamTrack) {
   const s = track.getSettings();
   const z = zoomRange(track);
-  return `${s.width}×${s.height} · ${track.label || "camera"}${z ? ` · zoom ${z.min}–${z.max}` : " · no zoom control"}`;
+  return [
+    `${s.width}×${s.height}`,
+    track.label || "camera",
+    z ? `zoom ${z.min}–${z.max}` : "no zoom control",
+    torchSupported(track) ? "flash ok" : "no flash control",
+  ].join(" · ");
 }
