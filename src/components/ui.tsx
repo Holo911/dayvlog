@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from "react";
+import { useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes } from "react";
 
 const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(" ");
 
@@ -80,6 +80,29 @@ const control = "h-12 w-full rounded-xl border border-line bg-surface px-3 text-
 
 export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
   return <input {...props} className={cx(control, props.className)} />;
+}
+
+/** Password field with an eye button to show what you typed (instead of a "confirm password" field). */
+export function PasswordInput(props: Omit<InputHTMLAttributes<HTMLInputElement>, "type">) {
+  const [visible, setVisible] = useState(false);
+  return (
+    <div className="relative">
+      <input {...props} type={visible ? "text" : "password"} autoCapitalize="none" autoCorrect="off" spellCheck={false} className={cx(control, "pr-12", props.className)} />
+      <button
+        type="button"
+        onClick={() => setVisible((v) => !v)}
+        aria-label={visible ? "Hide password" : "Show password"}
+        aria-pressed={visible}
+        className="absolute inset-y-0 right-0 grid w-12 place-items-center text-muted active:text-ink"
+      >
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" />
+          <circle cx="12" cy="12" r="3" />
+          {visible ? null : <path d="M3 3l18 18" />}
+        </svg>
+      </button>
+    </div>
+  );
 }
 
 export function Select(props: SelectHTMLAttributes<HTMLSelectElement>) {

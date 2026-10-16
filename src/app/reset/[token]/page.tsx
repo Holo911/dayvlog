@@ -3,7 +3,7 @@
 import { useParams } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { InstallHint } from "@/components/InstallHint";
-import { Button, ErrorText, Field, Input, Logo, Screen } from "@/components/ui";
+import { Button, ErrorText, Field, Logo, PasswordInput, Screen } from "@/components/ui";
 import { api } from "@/lib/client";
 
 export default function ResetPage() {
@@ -40,7 +40,7 @@ export default function ResetPage() {
       ) : (
         <form method="post" onSubmit={submit} className="flex flex-col gap-4">
           <Field label="New password" hint="At least 8 characters.">
-            <Input name="password" type="password" autoComplete="new-password" minLength={8} required />
+            <PasswordInput name="password" autoComplete="new-password" minLength={8} required />
           </Field>
           <ErrorText>{error}</ErrorText>
           <Button type="submit" busy={busy}>

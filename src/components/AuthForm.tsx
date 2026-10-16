@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState, type FormEvent } from "react";
 import { api, safeNext, useBrowser } from "@/lib/client";
-import { Button, ErrorText, Field, Input, Logo, Screen } from "./ui";
+import { Button, ErrorText, Field, Input, Logo, PasswordInput, Screen } from "./ui";
 
 // Plain email + password on purpose: inside an installed iPhone web app, iCloud Keychain
 // offers a strong password on sign-up and fills it with Face ID afterwards, which is as
@@ -53,9 +53,8 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
           <Input name="email" type="email" autoComplete="email" inputMode="email" autoCapitalize="none" required />
         </Field>
         <Field label="Password" hint={signup ? "At least 8 characters. Your iPhone can suggest and save one." : undefined}>
-          <Input
+          <PasswordInput
             name="password"
-            type="password"
             autoComplete={signup ? "new-password" : "current-password"}
             minLength={signup ? 8 : undefined}
             required
