@@ -34,7 +34,8 @@ export default function DayPage() {
     <VlogPlayer
       slots={slots}
       startIndex={startIndex}
-      title={`${info.group.name} · ${dayLabel(day)}`}
+      groupName={info.group.name}
+      dateLabel={dayLabel(day)}
       backHref={`/g/${id}`}
     />
   );

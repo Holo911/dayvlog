@@ -46,7 +46,7 @@ export function DayHero({
 
   const people = new Set(clips.map((c) => c.userId)).size;
   const hours = new Set(clips.map((c) => c.hour)).size;
-  const { cols, tileW, tileH } = layout(latest.length, box.w - PAD * 2, box.h - PAD * 2);
+  const { cols, tileW, tileH } = layout(latest.length, box.w, box.h);
 
   if (!clips.length) {
     return (
@@ -67,12 +67,12 @@ export function DayHero({
       aria-label={`Watch ${label.toLowerCase()}'s vlog`}
       className="relative mx-auto block aspect-[4/5] max-h-[58dvh] w-full overflow-hidden rounded-3xl bg-black active:opacity-90"
     >
-      <div ref={boxRef} className="absolute inset-0 flex items-center justify-center" style={{ padding: PAD }}>
+      <div ref={boxRef} className="absolute flex items-center justify-center" style={{ inset: PAD }}>
         {ready && tileW > 0 ? (
           <div className="flex flex-wrap content-center justify-center" style={{ width: cols * tileW + (cols - 1) * GAP, gap: GAP }}>
             {latest.map((c) => (
               <div key={c.id} className="relative shrink-0 overflow-hidden rounded-xl bg-neutral-950" style={{ width: tileW, height: tileH }}>
-                <video src={urls[c.id]} autoPlay muted loop playsInline className="absolute inset-0 size-full object-contain" />
+                <video src={urls[c.id]} autoPlay muted loop playsInline className="absolute inset-0 size-full object-cover" />
                 <p className="absolute bottom-1.5 left-2 truncate text-[11px] font-semibold drop-shadow" style={{ color: memberColor(c.userId) }}>
                   {c.userName}
                 </p>

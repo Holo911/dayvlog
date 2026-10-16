@@ -16,27 +16,38 @@ const MAX_SLOT_MS = 3200;
 const LOOKAHEAD = 2;
 
 export const GAP = 2;
-// Clips are recorded 3:4 (width:height). Tiles keep that shape so nobody gets cropped:
-// what you framed while recording is exactly what your friends see.
+// Clips are recorded 3:4 (width:height).
 export const TILE_ASPECT = 3 / 4;
 
-/** Columns × rows that show n whole clips as large as possible in a w × h stage. */
+/**
+ * Split-screen layout: tiles always span the full width (so 2 people are 2 full-width tiles).
+ * A tile is never taller than a whole 3:4 clip; when the height doesn't fit, it shows a
+ * centred slice of the clip, the way split-screen video apps do. Among the column counts,
+ * pick the one with the biggest tiles, penalised for how much of each clip gets cut.
+ */
 export function layout(n: number, w: number, h: number) {
-  let best = { cols: 1, tileW: 0, tileH: 0 };
-  for (let cols = 1; cols <= n; cols++) {
+  let best = { cols: 1, tileW: 0, tileH: 0, score: -1 };
+  for (let cols = 1; cols <= Math.max(1, n); cols++) {
     const rows = Math.ceil(n / cols);
-    const tileW = Math.min((w - GAP * (cols - 1)) / cols, ((h - GAP * (rows - 1)) / rows) * TILE_ASPECT);
-    if (tileW > best.tileW) best = { cols, tileW, tileH: tileW / TILE_ASPECT };
+    const tileW = (w - GAP * (cols - 1)) / cols;
+    const tileH = Math.min(tileW / TILE_ASPECT, (h - GAP * (rows - 1)) / rows);
+    if (tileW <= 0 || tileH <= 0) continue;
+    const shown = tileH / (tileW / TILE_ASPECT); // share of the clip's height that's visible
+    const score = tileW * tileH * shown * shown;
+    if (score > best.score) best = { cols, tileW, tileH, score };
   }
   return best;
 }
 
+/** Size of an element (no padding on it, please): measured right away, then kept up to date. */
 export function useBoxSize() {
-  const ref = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState({ w: 0, h: 0 });
-  useEffect(() => {
-    const el = ref.current;
+  const ref = useCallback((el: HTMLDivElement | null) => {
     if (!el) return;
+    // Measure immediately rather than waiting for the first ResizeObserver callback, which
+    // only arrives with the next rendered frame.
+    const r = el.getBoundingClientRect();
+    setBox({ w: r.width, h: r.height });
     const ro = new ResizeObserver(([entry]) => setBox({ w: entry.contentRect.width, h: entry.contentRect.height }));
     ro.observe(el);
     return () => ro.disconnect();
@@ -88,7 +99,7 @@ function Tile({ clip, src, active, muted, paused, width, height, onDecoded, onPl
       });
   }, [active, muted, paused]);
   return (
-    <div className="relative shrink-0 overflow-hidden rounded-md bg-neutral-950" style={{ width, height }}>
+    <div className="relative shrink-0 overflow-hidden bg-neutral-950" style={{ width, height }}>
       <video
         ref={ref}
         src={src}
@@ -97,13 +108,14 @@ function Tile({ clip, src, active, muted, paused, width, height, onDecoded, onPl
         preload="auto"
         onLoadedData={onDecoded}
         onPlaying={() => active && onPlaying()}
-        className="absolute inset-0 size-full object-contain"
+        className="absolute inset-0 size-full object-cover"
       />
-      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-2 pt-6">
+      {/* Name and the whole caption (max 60 characters), wrapped rather than cut off. */}
+      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent px-2.5 pb-2 pt-8">
         <p className="truncate text-xs font-semibold" style={{ color: memberColor(clip.userId) }}>
           {clip.userName}
         </p>
-        {clip.caption ? <p className="truncate text-xs text-white/90">{clip.caption}</p> : null}
+        {clip.caption ? <p className="line-clamp-3 break-words text-[13px] leading-snug text-white">{clip.caption}</p> : null}
       </div>
     </div>
   );
@@ -159,7 +171,19 @@ function HourGrid({ slot, urls, active, muted, paused, stage, onStarted }: GridP
 
 type Gesture = { x: number; y: number; held: boolean; timer?: ReturnType<typeof setTimeout> };
 
-export function VlogPlayer({ slots, startIndex, title, backHref }: { slots: Slot[]; startIndex: number; title: string; backHref: string }) {
+export function VlogPlayer({
+  slots,
+  startIndex,
+  groupName,
+  dateLabel,
+  backHref,
+}: {
+  slots: Slot[];
+  startIndex: number;
+  groupName: string;
+  dateLabel: string;
+  backHref: string;
+}) {
   const router = useRouter();
   const [index, setIndex] = useState(startIndex);
   const [paused, setPaused] = useState(false);
@@ -205,7 +229,7 @@ export function VlogPlayer({ slots, startIndex, title, backHref }: { slots: Slot
     return () => clearTimeout(t);
   }, [index, ready, started, ended]);
 
-  // Tap right = next hour, tap left = previous, hold = pause,
+  // Tap right = next hour, tap left = previous, hold = pause (e.g. to read a caption),
   // swipe left/right = next/previous hour, swipe down = close.
   function onPointerDown(e: React.PointerEvent) {
     const g: Gesture = { x: e.clientX, y: e.clientY, held: false };
@@ -250,12 +274,57 @@ export function VlogPlayer({ slots, startIndex, title, backHref }: { slots: Slot
     );
   }
 
-
   return (
-    <div data-no-edge-swipe className="fixed inset-0 select-none overflow-hidden bg-black text-white">
+    <div data-no-edge-swipe className="fixed inset-0 flex select-none flex-col overflow-hidden bg-black text-white">
+      {/* Header sits above the clips, so nothing covers anyone's video. */}
+      <header className="safe-top shrink-0 px-3 pb-2">
+        <div className="flex gap-1">
+          {slots.map((s, i) => (
+            <div key={s.hour} className="h-0.5 flex-1 overflow-hidden rounded-full bg-white/25">
+              <div
+                key={i === index ? `run-${index}` : i}
+                className={cx("h-full bg-white", i < index && "w-full", i > index && "w-0")}
+                style={
+                  i === index && !ended
+                    ? {
+                        animation: `dv-progress ${duration}ms linear forwards`,
+                        animationPlayState: paused || !started ? "paused" : "running",
+                      }
+                    : undefined
+                }
+              />
+            </div>
+          ))}
+        </div>
+        <div className="mt-2 flex items-center gap-2">
+          <Link href={backHref} aria-label="Close" className="grid size-10 shrink-0 place-items-center rounded-full bg-white/10">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </Link>
+          <div className="min-w-0 flex-1 text-center leading-tight">
+            <p className="text-2xl font-bold tabular-nums">{formatHour(slot.hour)}</p>
+            <p className="truncate text-xs text-white/60">
+              {groupName} · {dateLabel}
+            </p>
+          </div>
+          <button
+            type="button"
+            aria-label={muted ? "Sound on" : "Sound off"}
+            onClick={() => setMuted((m) => !m)}
+            className="grid size-10 shrink-0 place-items-center rounded-full bg-white/10"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M11 5L6 9H3v6h3l5 4V5z" />
+              {muted ? <path d="M22 9l-6 6M16 9l6 6" /> : <path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13" />}
+            </svg>
+          </button>
+        </div>
+      </header>
+
       <div
         ref={stageRef}
-        className="absolute inset-x-1 bottom-[max(env(safe-area-inset-bottom),8px)] top-[calc(max(env(safe-area-inset-top),12px)+64px)] flex items-center justify-center"
+        className="relative min-h-0 flex-1"
         style={{ touchAction: "none" }}
         onPointerDown={ended ? undefined : onPointerDown}
         onPointerMove={ended ? undefined : onPointerMove}
@@ -279,65 +348,20 @@ export function VlogPlayer({ slots, startIndex, title, backHref }: { slots: Slot
               />
             ))
           : null}
-        {!ended ? (
-          <div className="pointer-events-none absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-3">
-            <div className="rounded-full bg-black/70 px-4 py-1.5 font-mono text-lg font-semibold tabular-nums backdrop-blur">
-              {formatHour(slot.hour)}
-            </div>
-            {/* Only if the wait is noticeable: a normal cut to the next hour takes a few ms. */}
-            {!started ? (
-              <span style={{ animation: "dv-fade-in 0.2s 0.35s both" }}>
-                <Spinner className="text-white/70" />
-              </span>
-            ) : null}
-          </div>
+        {/* Only if the wait is noticeable: a normal cut to the next hour takes a few ms. */}
+        {!ended && !started ? (
+          <span className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2" style={{ animation: "dv-fade-in 0.2s 0.35s both" }}>
+            <Spinner className="text-white/70" />
+          </span>
+        ) : null}
+        {paused ? (
+          <span className="pointer-events-none absolute bottom-6 left-1/2 -translate-x-1/2 rounded-full bg-black/60 px-3 py-1 text-xs backdrop-blur">
+            Paused · let go to continue
+          </span>
         ) : null}
       </div>
-
-      {ended ? null : (
-        <>
-          <div className="safe-top pointer-events-none absolute inset-x-0 top-0 bg-gradient-to-b from-black/60 to-transparent px-3 pb-8">
-            <div className="flex gap-1">
-              {slots.map((s, i) => (
-                <div key={s.hour} className="h-0.5 flex-1 overflow-hidden rounded-full bg-white/30">
-                  <div
-                    key={i === index ? `run-${index}` : i}
-                    className={cx("h-full bg-white", i < index && "w-full", i > index && "w-0")}
-                    style={
-                      i === index
-                        ? {
-                            animation: `dv-progress ${duration}ms linear forwards`,
-                            animationPlayState: paused || !started ? "paused" : "running",
-                          }
-                        : undefined
-                    }
-                  />
-                </div>
-              ))}
-            </div>
-            <div className="pointer-events-auto mt-2 flex items-center justify-between">
-              <Link href={backHref} aria-label="Close" className="grid size-10 place-items-center rounded-full bg-black/40">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
-                  <path d="M6 6l12 12M18 6L6 18" />
-                </svg>
-              </Link>
-              <p className="text-sm font-semibold">{title}</p>
-              <button
-                type="button"
-                aria-label={muted ? "Sound on" : "Sound off"}
-                onClick={() => setMuted((m) => !m)}
-                className="grid size-10 place-items-center rounded-full bg-black/40"
-              >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M11 5L6 9H3v6h3l5 4V5z" />
-                  {muted ? <path d="M22 9l-6 6M16 9l6 6" /> : <path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13" />}
-                </svg>
-              </button>
-            </div>
-          </div>
-          <style>{`@keyframes dv-progress { from { width: 0 } to { width: 100% } } @keyframes dv-fade-in { from { opacity: 0 } to { opacity: 1 } }`}</style>
-        </>
-      )}
+      <div className="safe-bottom shrink-0" />
+      <style>{`@keyframes dv-progress { from { width: 0 } to { width: 100% } } @keyframes dv-fade-in { from { opacity: 0 } to { opacity: 1 } }`}</style>
     </div>
   );
 }
