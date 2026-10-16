@@ -3,50 +3,8 @@
 import { useState } from "react";
 import { InstallHint } from "@/components/InstallHint";
 import { PushToggle } from "@/components/PushToggle";
-import { Button, Card, Loading, Screen, TopBar, cx } from "@/components/ui";
-import { setCameraMode, useCameraMode, type CameraMode } from "@/lib/camera";
+import { Button, Card, Loading, Screen, TopBar } from "@/components/ui";
 import { api, LAST_GROUP, useApi, type Me } from "@/lib/client";
-
-const CAMERA_OPTIONS: { mode: CameraMode; title: string; text: string }[] = [
-  {
-    mode: "inapp",
-    title: "In-app camera",
-    text: "Records exactly 2.5 s in a horizontal frame, right inside the app. On iPhone it asks for camera permission most times.",
-  },
-  {
-    mode: "apple",
-    title: "iPhone camera",
-    text: "Opens Apple's camera, so the app never asks for permission. You stop it yourself, pick 2.5 s, and it's cropped to horizontal.",
-  },
-];
-
-function CameraChoice() {
-  const mode = useCameraMode();
-  return (
-    <Card className="flex flex-col gap-3">
-      <p className="font-semibold">Camera on this device</p>
-      {CAMERA_OPTIONS.map((o) => (
-        <button
-          key={o.mode}
-          type="button"
-          onClick={() => setCameraMode(o.mode)}
-          className={cx(
-            "flex gap-3 rounded-2xl border p-3 text-left",
-            mode === o.mode ? "border-accent bg-accent/10" : "border-line",
-          )}
-        >
-          <span className={cx("mt-1 grid size-4 shrink-0 place-items-center rounded-full border-2", mode === o.mode ? "border-accent" : "border-muted")}>
-            {mode === o.mode ? <span className="size-2 rounded-full bg-accent" /> : null}
-          </span>
-          <span>
-            <span className="block font-semibold">{o.title}</span>
-            <span className="block text-sm text-muted">{o.text}</span>
-          </span>
-        </button>
-      ))}
-    </Card>
-  );
-}
 
 export default function SettingsPage() {
   const { data } = useApi<Me>("/api/me");
@@ -69,7 +27,6 @@ export default function SettingsPage() {
         <p className="font-semibold">Notifications on this device</p>
         <PushToggle />
       </Card>
-      <CameraChoice />
       <InstallHint />
       <Button
         variant="secondary"

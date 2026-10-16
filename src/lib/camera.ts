@@ -4,47 +4,7 @@
 // back "Dual Wide"/"Triple" camera, whose zoom range starts at 0.5 (the ultra-wide lens),
 // so lens changes are just zoom values and happen without restarting the camera.
 
-import { useSyncExternalStore } from "react";
-
 export type Facing = "user" | "environment";
-
-// Which camera Record opens, remembered per device:
-// - "inapp" (default): horizontal viewfinder inside the app, exactly 2.5 s. On iPhone, iOS
-//   asks for camera permission again most times (Home Screen web apps can't keep it).
-// - "apple": Apple's own camera through a file input, which never asks for permission; you
-//   then pick 2.5 s and the app crops it to the same horizontal clip.
-export type CameraMode = "apple" | "inapp";
-const MODE_KEY = "dayvlog:cameraMode";
-const modeListeners = new Set<() => void>();
-
-export function getCameraMode(): CameraMode {
-  try {
-    const saved = localStorage.getItem(MODE_KEY);
-    if (saved === "apple" || saved === "inapp") return saved;
-  } catch {
-    // Storage unavailable: fall through to the default.
-  }
-  return "inapp";
-}
-
-export function setCameraMode(mode: CameraMode) {
-  try {
-    localStorage.setItem(MODE_KEY, mode);
-  } catch {
-    // Not remembered, but still applies until the app closes.
-  }
-  modeListeners.forEach((l) => l());
-}
-
-function subscribeMode(listener: () => void) {
-  modeListeners.add(listener);
-  return () => modeListeners.delete(listener);
-}
-
-/** Server render uses "apple" on purpose: it has no side effects, unlike opening the live camera. */
-export function useCameraMode() {
-  return useSyncExternalStore(subscribeMode, getCameraMode, () => "apple" as CameraMode);
-}
 
 const MIME_TYPES = [
   "video/mp4;codecs=avc1.42E01E,mp4a.40.2",

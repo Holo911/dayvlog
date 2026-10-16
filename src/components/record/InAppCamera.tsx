@@ -4,16 +4,16 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, ErrorText, Spinner, cx } from "@/components/ui";
-import { describeTrack, openCamera, quickZooms, setCameraMode, setZoom, zoomRange, type Facing } from "@/lib/camera";
+import { describeTrack, openCamera, quickZooms, setZoom, zoomRange, type Facing } from "@/lib/camera";
 import { createClipRecorder } from "@/lib/clipFormat";
 import { useNow, type GroupInfo } from "@/lib/client";
 import { cityName, currentSlot, formatHour, inWindow } from "@/lib/time";
 import { uploadClip } from "@/lib/upload";
 
-// The in-app camera: a horizontal viewfinder, exactly 2.5 s, zoom presets. It records the
-// horizontal 16:9 band shown in the viewfinder (see lib/clipFormat.ts). On iPhone, Home Screen
-// web apps can't keep camera permission, so this asks for it again most times; the Apple
-// camera mode (AppleCamera.tsx) avoids that.
+// The camera: a horizontal viewfinder, exactly 2.5 s, zoom presets. It records the horizontal
+// 16:9 band shown in the viewfinder (see lib/clipFormat.ts), so every clip has the same shape.
+// On iPhone, Home Screen web apps can't keep camera permission, so iOS asks again most times.
+// (An Apple-camera mode was tried and removed: its videos came in any shape and length.)
 
 const CLIP_MS = 2500;
 const ZOOM_ANIMATION_MS = 180;
@@ -59,9 +59,9 @@ function fakeCameraStream() {
 
 function cameraError(err: unknown) {
   const name = (err as Error)?.name;
-  if (name === "NotAllowedError") return "Camera access is blocked. You can use the iPhone camera instead.";
+  if (name === "NotAllowedError") return "Camera access was not allowed. Tap Try again and choose Allow.";
   if (name === "NotFoundError") return "No camera found on this device.";
-  return "The in-app camera didn't start. You can still use the iPhone camera.";
+  return "The camera didn't start. Close other apps using the camera and try again.";
 }
 
 export function InAppCamera({ groupId: id, info }: { groupId: string; info: GroupInfo | null }) {
@@ -190,7 +190,7 @@ export function InAppCamera({ groupId: id, info }: { groupId: string; info: Grou
     if (!stream || !video || phase !== "live") return;
     const rec = createClipRecorder(stream.getAudioTracks());
     if (!rec) {
-      setError("This phone can't record in the app. Use the iPhone camera instead.");
+      setError("This browser can't record video. Update iOS and try again.");
       stopStream();
       setPhase("fallback");
       return;
@@ -384,20 +384,15 @@ export function InAppCamera({ groupId: id, info }: { groupId: string; info: Grou
         ) : null}
 
         {phase === "fallback" ? (
-          <Button onClick={() => setCameraMode("apple")}>Use the iPhone camera</Button>
-        ) : null}
-        {phase === "live" ? (
-          <button
-            type="button"
+          <Button
             onClick={() => {
-              // Release the camera first: Apple's camera can't start while we hold it.
-              stopStream();
-              setCameraMode("apple");
+              setError(null);
+              setPhase("starting");
+              setRestartKey((k) => k + 1);
             }}
-            className="self-center pb-1 text-xs text-white/70 underline underline-offset-4"
           >
-            Use the iPhone camera instead (no permission prompts)
-          </button>
+            Try again
+          </Button>
         ) : null}
       </div>
     </div>

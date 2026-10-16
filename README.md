@@ -4,7 +4,7 @@ A Setlog-style group video app as an installable web app (PWA). Every hour insid
 
 - **Groups** of up to 12 people join with an invite code or link.
 - **Hourly drops** run between a first and a last hour (default 06:00–22:00) in the **group's time zone**, which is set per group. Nobody gets notifications at night. Settings show the drop hours converted to your own clock when you're in another zone.
-- **Clips** can only be recorded live for the current hour. A retake replaces your clip for that hour. If the in-app camera fails, the native iPhone camera is the fallback.
+- **Clips** can only be recorded live for the current hour. A retake replaces your clip for that hour. The in-app camera always records a horizontal 2.5 s clip, so every clip has the same shape.
 - **The vlog** is played back in the browser (no server-side rendering). Tiles keep the same order every hour, the hour shows in the middle, tap to skip and hold to pause.
 - **Login** is email + password; iCloud Keychain saves the password and fills it in with Face ID. There's no email service, so a forgotten password is fixed by the group owner: Group → Members → *Reset password* creates a one-time 48-hour link.
 
