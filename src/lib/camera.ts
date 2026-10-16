@@ -20,13 +20,19 @@ export function pickMime() {
   return MIME_TYPES.find((t) => MediaRecorder.isTypeSupported(t));
 }
 
-export async function openCamera(facing: Facing) {
-  // Ask for a 3:4 portrait frame (the sensor's full view on phones), 1440 px wide: the clip is
-  // a horizontal 16:9 band across the full width, so width is what gives it detail.
+/**
+ * `shape` must match the screen: iOS keeps the size you asked for when the screen rotates, so
+ * portrait settings on a landscape screen gave a cut-down, zoomed-in picture. The camera is
+ * reopened whenever the screen orientation changes.
+ */
+export async function openCamera(facing: Facing, shape: "portrait" | "landscape") {
+  // 4:3 is the sensor's full view on phones; the 16:9 clip is cut from it.
+  const long = 1920;
+  const short = 1440;
   const video: MediaTrackConstraints = {
     facingMode: { ideal: facing },
-    width: { ideal: 1440 },
-    height: { ideal: 1920 },
+    width: { ideal: shape === "landscape" ? long : short },
+    height: { ideal: shape === "landscape" ? short : long },
     frameRate: { ideal: 30 },
   };
   try {

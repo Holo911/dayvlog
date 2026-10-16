@@ -12,9 +12,11 @@ import { uploadClip } from "@/lib/upload";
 
 // The camera: you film holding the phone sideways, like the original app. The viewfinder
 // fills the screen and shows exactly what gets recorded: a horizontal 16:9 clip of exactly
-// 2.5 s (see lib/clipFormat.ts). When the page itself stays portrait (rotation lock, or the
-// OS not rotating web apps), the controls are drawn rotated a quarter turn so they read
-// upright with the phone's top to the left. Caption and posting happen upright again.
+// 2.5 s (see lib/clipFormat.ts). Held upright, it shows "turn your phone" and the camera
+// stays off; when the screen rotates, the landscape camera opens. With rotation lock on the
+// screen can't rotate, so you can opt into "sideways" mode: the page stays portrait and the
+// controls are drawn a quarter turn rotated (top of the phone to the left). Caption and
+// posting happen upright again.
 // On iPhone, Home Screen web apps can't keep camera permission, so iOS asks again most times.
 
 const CLIP_MS = 2500;
@@ -69,6 +71,29 @@ function cameraError(err: unknown) {
   return "The camera didn't start. Close other apps using the camera and try again.";
 }
 
+const LOCKED_KEY = "dayvlog:rotationLocked";
+const lockedListeners = new Set<() => void>();
+function getLocked() {
+  try {
+    return localStorage.getItem(LOCKED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+function setLocked(on: boolean) {
+  try {
+    if (on) localStorage.setItem(LOCKED_KEY, "1");
+    else localStorage.removeItem(LOCKED_KEY);
+  } catch {
+    // Not remembered, but applies until the app closes.
+  }
+  lockedListeners.forEach((l) => l());
+}
+function subscribeLocked(listener: () => void) {
+  lockedListeners.add(listener);
+  return () => lockedListeners.delete(listener);
+}
+
 const landscapeQuery = "(orientation: landscape)";
 function subscribeOrientation(listener: () => void) {
   const mq = window.matchMedia(landscapeQuery);
@@ -109,7 +134,6 @@ export function InAppCamera({ groupId: id, info }: { groupId: string; info: Grou
   const [flash, setFlash] = useState(false);
   const [torch, setTorchAvailable] = useState(false);
   const [screenFlash, setScreenFlash] = useState(false);
-  const [hint, setHint] = useState(true);
   // Whether camera frames arrive landscape. Held sideways with the page portrait, iOS may hand
   // us frames either still matching the screen (portrait: we rotate them) or already turned
   // to match the world (landscape: we don't). Read from the actual frames, so both work.
@@ -121,9 +145,12 @@ export function InAppCamera({ groupId: id, info }: { groupId: string; info: Grou
   const [caption, setCaption] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  // Portrait page = phone held sideways with the page not rotating: controls are drawn rotated.
   const landscapePage = useSyncExternalStore(subscribeOrientation, () => window.matchMedia(landscapeQuery).matches, () => false);
-  const sideways = !landscapePage;
+  const locked = useSyncExternalStore(subscribeLocked, getLocked, () => false);
+  // landscape: the screen rotated, normal landscape camera. sideways: rotation lock, controls
+  // drawn rotated on a portrait page. turn: held upright, waiting for you to turn the phone.
+  const mode = landscapePage ? "landscape" : locked ? "sideways" : "turn";
+  const sideways = mode === "sideways";
   // Frames that still match the portrait screen get rotated a quarter turn into the clip.
   const rotateFrames = sideways && !frameLandscape;
 
@@ -133,6 +160,10 @@ export function InAppCamera({ groupId: id, info }: { groupId: string; info: Grou
   }, []);
 
   useEffect(() => {
+    if (mode === "turn") {
+      stopStream();
+      return;
+    }
     let cancelled = false;
     (async () => {
       stopStream();
@@ -142,7 +173,7 @@ export function InAppCamera({ groupId: id, info }: { groupId: string; info: Grou
         if (!navigator.mediaDevices?.getUserMedia) throw Object.assign(new Error("no camera API"), { name: "NotFoundError" });
         // Dev-only: /record?fake skips the real webcam (used for automated testing).
         if (process.env.NODE_ENV === "development" && window.location.search.includes("fake")) throw new Error("fake");
-        stream = await openCamera(facing);
+        stream = await openCamera(facing, mode === "landscape" ? "landscape" : "portrait");
       } catch (err) {
         if (process.env.NODE_ENV !== "development") {
           if (!cancelled) {
@@ -178,7 +209,7 @@ export function InAppCamera({ groupId: id, info }: { groupId: string; info: Grou
     return () => {
       cancelled = true;
     };
-  }, [facing, restartKey, stopStream]);
+  }, [facing, restartKey, mode, stopStream]);
 
   useEffect(
     () => () => {
@@ -187,12 +218,6 @@ export function InAppCamera({ groupId: id, info }: { groupId: string; info: Grou
     },
     [stopStream],
   );
-
-  // "Turn your phone sideways" shows briefly when the camera opens.
-  useEffect(() => {
-    const t = setTimeout(() => setHint(false), 2500);
-    return () => clearTimeout(t);
-  }, []);
 
   const liveTrack = () => streamRef.current?.getVideoTracks()[0];
 
@@ -372,7 +397,7 @@ export function InAppCamera({ groupId: id, info }: { groupId: string; info: Grou
         className={cx(
           "absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 overflow-hidden bg-neutral-900",
           sideways ? "aspect-[9/16] max-h-full w-full" : "aspect-video h-full max-w-full",
-          reviewing && "invisible",
+          (reviewing || mode === "turn") && "invisible",
         )}
       >
         <video
@@ -390,7 +415,7 @@ export function InAppCamera({ groupId: id, info }: { groupId: string; info: Grou
       {/* Front "flash": warm white screen while filming yourself. */}
       {screenFlash ? <div className="pointer-events-none absolute inset-0 z-10 bg-[#fff4e0] opacity-90" /> : null}
 
-      {!reviewing ? (
+      {!reviewing && mode !== "turn" ? (
         <div className="absolute left-1/2 top-1/2 z-20" style={controlsBox}>
           <div className="absolute" style={safeBox}>
             <div className="flex items-start justify-between gap-2">
@@ -451,6 +476,11 @@ export function InAppCamera({ groupId: id, info }: { groupId: string; info: Grou
             ) : null}
 
             <div className="absolute inset-x-0 bottom-0 flex flex-col items-center gap-2">
+              {sideways && phase === "live" ? (
+                <button type="button" onClick={() => setLocked(false)} className="text-[11px] text-white/70 underline underline-offset-2 drop-shadow">
+                  My screen rotates now
+                </button>
+              ) : null}
               {offHours && phase === "live" ? <p className="text-xs text-white/80 drop-shadow">Outside drop hours, but it still goes into today&apos;s vlog.</p> : null}
               {(phase === "live" || phase === "recording") && presets.length > 1 ? (
                 <div className="flex items-center gap-2">
@@ -477,15 +507,31 @@ export function InAppCamera({ groupId: id, info }: { groupId: string; info: Grou
         </div>
       ) : null}
 
-      {/* Shown upright (not rotated) for a moment, telling you how to hold the phone. */}
-      {sideways && hint && phase !== "fallback" && !reviewing ? (
-        <div className="pointer-events-none absolute left-1/2 top-1/2 z-30 flex -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-3 rounded-3xl bg-black/70 px-6 py-5 text-center backdrop-blur">
-          <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" style={{ animation: "dv-turn 1.6s ease-in-out infinite" }} aria-hidden>
-            <rect x="7" y="2" width="10" height="20" rx="2" />
-            <path d="M11 18h2" />
-          </svg>
-          <p className="text-sm font-semibold">Turn your phone sideways</p>
-          <style>{`@keyframes dv-turn { 0%, 20% { transform: rotate(0) } 60%, 100% { transform: rotate(-90deg) } }`}</style>
+      {/* Held upright: wait for the phone to be turned (the camera stays off meanwhile). */}
+      {mode === "turn" && !reviewing ? (
+        <div className="safe-top safe-bottom absolute inset-0 z-20 flex flex-col px-4">
+          <div className="flex items-center justify-between pb-3">
+            {closeButton}
+            {hourLabel}
+            <span className="size-11" />
+          </div>
+          <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center">
+            <svg width="72" height="72" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ animation: "dv-turn 1.8s ease-in-out infinite" }} aria-hidden>
+              <rect x="7" y="2" width="10" height="20" rx="2" />
+              <path d="M11 18h2" />
+            </svg>
+            <p className="text-xl font-semibold">Turn your phone sideways</p>
+            <p className="max-w-64 text-sm text-white/60">Clips are horizontal, so the camera opens when you hold the phone sideways.</p>
+            <style>{`@keyframes dv-turn { 0%, 20% { transform: rotate(0) } 60%, 100% { transform: rotate(-90deg) } }`}</style>
+          </div>
+          <div className="flex flex-col items-center gap-2 pb-2">
+            <p className="max-w-72 text-center text-xs text-white/50">
+              Nothing happens when you turn it? Rotation Lock is probably on (Control Center).
+            </p>
+            <Button variant="secondary" onClick={() => setLocked(true)} className="max-w-72 bg-white/10">
+              My screen doesn&apos;t rotate
+            </Button>
+          </div>
         </div>
       ) : null}
 
