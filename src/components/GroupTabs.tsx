@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import type { ReactNode } from "react";
 import { cx } from "./ui";
 
 const icons = {
@@ -16,7 +17,8 @@ const icons = {
   ),
 };
 
-export function GroupTabs({ groupId }: { groupId: string }) {
+/** Bottom bar for a group. `action` (e.g. the Record button) sits pinned just above the tabs. */
+export function GroupTabs({ groupId, action }: { groupId: string; action?: ReactNode }) {
   const path = usePathname();
   const tabs = [
     { href: "/?home", match: "/", label: "Groups", icon: icons.groups },
@@ -26,8 +28,9 @@ export function GroupTabs({ groupId }: { groupId: string }) {
   ];
   return (
     <>
-      <div className="h-20" aria-hidden />
+      <div className={action ? "h-40" : "h-20"} aria-hidden />
       <nav className="safe-bottom fixed inset-x-0 bottom-0 z-10 border-t border-line bg-bg/90 backdrop-blur">
+        {action ? <div className="mx-auto max-w-md px-4 pt-3">{action}</div> : null}
         <div className="mx-auto flex max-w-md">
           {tabs.map((t) => {
             const active = path === t.match;

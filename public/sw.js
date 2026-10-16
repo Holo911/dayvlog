@@ -11,15 +11,19 @@ self.addEventListener("push", (event) => {
   } catch {
     data = { body: event.data ? event.data.text() : "" };
   }
+  const title = data.title || "Day Vlog";
+  const options = {
+    body: data.body || "New drop!",
+    icon: "/icon-192.png",
+    tag: data.tag,
+    data: { url: data.url || "/" },
+  };
+  // iOS cancels push permission for apps that receive pushes without showing anything,
+  // so if the full notification fails for any reason, show a plain one instead.
   event.waitUntil(
-    self.registration.showNotification(data.title || "Day Vlog", {
-      body: data.body || "New drop!",
-      icon: "/icon-192.png",
-      badge: "/badge-96.png",
-      tag: data.tag,
-      renotify: Boolean(data.tag),
-      data: { url: data.url || "/" },
-    }),
+    self.registration
+      .showNotification(title, options)
+      .catch(() => self.registration.showNotification(title, { body: options.body, data: options.data })),
   );
 });
 

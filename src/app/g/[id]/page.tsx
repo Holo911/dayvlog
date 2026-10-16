@@ -6,7 +6,8 @@ import { useEffect, useMemo } from "react";
 import { GroupTabs } from "@/components/GroupTabs";
 import { InstallHint } from "@/components/InstallHint";
 import { PushToggle } from "@/components/PushToggle";
-import { Card, ErrorText, LinkButton, Loading, Screen, TopBar, cx } from "@/components/ui";
+import { DayHero } from "@/components/DayHero";
+import { ErrorText, Loading, Screen, TopBar, cx } from "@/components/ui";
 import {
   deviceTimeZone,
   initials,
@@ -77,7 +78,35 @@ export default function TodayPage() {
   const hours = Array.from(new Set([...windowHours(group.firstHour, group.lastHour), ...byHour.keys()]))
     .filter((h) => slotOrder(h) <= slotOrder(slot.hour))
     .sort((a, b) => slotOrder(b) - slotOrder(a));
-  const total = day?.clips.length ?? 0;
+  const status = open
+    ? `${60 - slot.minute} min left`
+    : next !== null
+      ? `Quiet hours · next drop ${formatHour(next)}`
+      : `First drop tomorrow ${formatHour(group.firstHour)}`;
+
+  // Pinned above the tabs so recording is always one tap away, wherever you scroll.
+  const recordBar = mine ? (
+    <div className="flex h-12 items-center gap-3 rounded-2xl border border-line bg-surface px-4">
+      <span className="text-ok">✓</span>
+      <p className="flex-1 text-sm">
+        You&apos;re in for <b className="tabular-nums">{formatHour(slot.hour)}</b>
+      </p>
+      <Link href={`/g/${id}/record`} className="text-sm text-muted underline underline-offset-4">
+        Retake
+      </Link>
+    </div>
+  ) : (
+    <Link
+      href={`/g/${id}/record`}
+      className={cx(
+        "flex h-12 items-center justify-center gap-2.5 rounded-2xl px-4 font-semibold",
+        open ? "bg-accent text-accent-ink" : "border border-line bg-surface text-ink",
+      )}
+    >
+      <span className={cx("size-3 rounded-full", open ? "bg-accent-ink" : "bg-accent")} />
+      {open ? `Record your ${formatHour(slot.hour)} clip` : "Post a clip anyway"}
+    </Link>
+  );
 
   return (
     <Screen className="gap-4">
@@ -97,30 +126,33 @@ export default function TodayPage() {
         }
       />
 
-      <Card className="flex flex-col gap-4">
-        <div className="flex items-baseline justify-between">
-          <div>
-            <p className="text-3xl font-bold tabular-nums">{formatHour(slot.hour)}</p>
-            <p className="text-sm text-muted">
-              {open
-                ? `${60 - slot.minute} min left in this drop`
-                : next !== null
-                  ? `Quiet hours · next drop ${formatHour(next)}`
-                  : `Done for today · first drop tomorrow ${formatHour(group.firstHour)}`}
-            </p>
-          </div>
-          <p className="text-sm text-muted">
-            {posted.length}/{members.length} in
+      <DayHero
+        href={`/g/${id}/day/${slot.day}`}
+        label="Today"
+        clips={day?.clips ?? []}
+        memberOrder={members.map((m) => m.id)}
+        emptyTitle="No clips yet today"
+        emptyText={open ? "Be the first: record your 2 seconds below." : `The first drop is at ${formatHour(group.firstHour)}.`}
+      />
+
+      <div className="flex items-center gap-3 px-1">
+        <div className="flex-1">
+          <p className="font-semibold tabular-nums">
+            {formatHour(slot.hour)} {open ? "drop" : ""}
           </p>
+          <p className="text-sm text-muted">{status}</p>
         </div>
-        <div className="flex flex-wrap gap-1.5">
+        <div className="flex -space-x-1.5">
           {members.map((m) => {
             const done = posted.some((c) => c.userId === m.id);
             return (
               <span
                 key={m.id}
                 title={m.name}
-                className={cx("grid size-8 place-items-center rounded-full text-[11px] font-bold text-black", !done && "opacity-25")}
+                className={cx(
+                  "grid size-8 place-items-center rounded-full border-2 border-bg text-[11px] font-bold text-black",
+                  !done && "opacity-25",
+                )}
                 style={{ background: memberColor(m.id) }}
               >
                 {initials(m.name)}
@@ -128,38 +160,20 @@ export default function TodayPage() {
             );
           })}
         </div>
-        {mine ? (
-          <div className="flex items-center gap-3">
-            <video src={`${mine.url}#t=0.1`} muted playsInline preload="metadata" className="h-20 w-12 rounded-lg bg-black object-cover" />
-            <div className="flex-1">
-              <p className="font-semibold text-ok">You&apos;re in for {formatHour(slot.hour)} ✓</p>
-              {mine.caption ? <p className="text-sm text-muted">“{mine.caption}”</p> : null}
-            </div>
-            <Link href={`/g/${id}/record`} className="text-sm text-muted underline underline-offset-4">
-              Retake
-            </Link>
-          </div>
-        ) : (
-          <LinkButton href={`/g/${id}/record`} variant={open ? "primary" : "secondary"}>
-            {open ? "Record your 2 seconds" : "Post anyway"}
-          </LinkButton>
-        )}
-      </Card>
+        <span className="w-9 text-right text-sm text-muted tabular-nums">
+          {posted.length}/{members.length}
+        </span>
+      </div>
 
       <PushToggle compact />
       <InstallHint />
 
-      {total ? (
-        <LinkButton href={`/g/${id}/day/${slot.day}`} variant="secondary">
-          ▶ Play today so far · {total} {total === 1 ? "clip" : "clips"}
-        </LinkButton>
-      ) : null}
-
       <section className="flex flex-col">
+        <p className="mb-1 px-1 text-xs font-semibold uppercase tracking-wide text-muted">Today by the hour</p>
         {hours.map((h) => {
           const clips = byHour.get(h) ?? [];
           const row = (
-            <div className="flex items-center gap-3 border-b border-line py-2.5">
+            <div className="flex items-center gap-3 border-b border-line px-1 py-2.5">
               <span className={cx("w-12 font-mono text-sm tabular-nums", clips.length ? "text-ink" : "text-muted")}>{formatHour(h)}</span>
               <div className="flex flex-1 -space-x-1.5">
                 {clips.map((c) => (
@@ -174,7 +188,7 @@ export default function TodayPage() {
                 ))}
                 {!clips.length ? <span className="text-sm text-muted">{h === slot.hour ? "now" : "no clips"}</span> : null}
               </div>
-              {clips.length ? <span className="text-muted">›</span> : null}
+              {clips.length ? <span className="text-muted">▶</span> : null}
             </div>
           );
           return clips.length ? (
@@ -187,7 +201,7 @@ export default function TodayPage() {
         })}
       </section>
 
-      <GroupTabs groupId={id} />
+      <GroupTabs groupId={id} action={recordBar} />
     </Screen>
   );
 }

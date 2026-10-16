@@ -30,7 +30,7 @@ function message(groupName: string, hour: number, firstHour: number, lastHour: n
 export async function runTick(now = new Date()) {
   const db = await getDb();
   const all = await db.select().from(groups);
-  const fired: { group: string; day: string; hour: number; sent: number }[] = [];
+  const fired: { group: string; day: string; hour: number; sent: number; failed: number; pruned: number; errors: string[] }[] = [];
 
   for (const g of all) {
     const slot = currentSlot(now, g.timezone);
@@ -47,12 +47,15 @@ export async function runTick(now = new Date()) {
       .select({ userId: memberships.userId })
       .from(memberships)
       .where(and(eq(memberships.groupId, g.id), eq(memberships.notify, true)));
-    const result = await sendToUsers(
-      members.map((m) => m.userId),
-      { ...message(g.name, slot.hour, g.firstHour, g.lastHour), url: `/g/${g.id}/record`, tag: `drop-${g.id}` },
-      `drop-${g.id}`.slice(0, 32),
-    );
-    fired.push({ group: g.id, day: slot.day, hour: slot.hour, sent: result.sent });
+    const result = await sendToUsers(members.map((m) => m.userId), {
+      ...message(g.name, slot.hour, g.firstHour, g.lastHour),
+      url: `/g/${g.id}/record`,
+      // One tag per hour. A tag shared by every drop made iOS silently replace the previous
+      // notification instead of showing a new banner.
+      tag: `drop-${g.id}-${slot.day}-${slot.hour}`,
+    });
+    // Visible in cron-job.org's run history, so a failing push is easy to spot.
+    fired.push({ group: g.id, day: slot.day, hour: slot.hour, ...result });
   }
 
   const removedClips = await cleanupClips(RETENTION_DAYS);

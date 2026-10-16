@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useClipUrls } from "@/lib/clipCache";
 import { memberColor, type DayClip } from "@/lib/client";
 import { formatHour } from "@/lib/time";
-import { Button, Spinner, cx } from "./ui";
+import { Spinner, cx } from "./ui";
 
 export type Slot = { hour: number; clips: DayClip[] };
 
@@ -14,13 +15,13 @@ const MAX_SLOT_MS = 3200;
 // How many hours after the current one to download in advance.
 const LOOKAHEAD = 2;
 
-const GAP = 2;
+export const GAP = 2;
 // Clips are recorded 3:4 (width:height). Tiles keep that shape so nobody gets cropped:
 // what you framed while recording is exactly what your friends see.
-const TILE_ASPECT = 3 / 4;
+export const TILE_ASPECT = 3 / 4;
 
 /** Columns × rows that show n whole clips as large as possible in a w × h stage. */
-function layout(n: number, w: number, h: number) {
+export function layout(n: number, w: number, h: number) {
   let best = { cols: 1, tileW: 0, tileH: 0 };
   for (let cols = 1; cols <= n; cols++) {
     const rows = Math.ceil(n / cols);
@@ -30,7 +31,7 @@ function layout(n: number, w: number, h: number) {
   return best;
 }
 
-function useBoxSize() {
+export function useBoxSize() {
   const ref = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState({ w: 0, h: 0 });
   useEffect(() => {
@@ -41,40 +42,6 @@ function useBoxSize() {
     return () => ro.disconnect();
   }, []);
   return [ref, box] as const;
-}
-
-/**
- * Downloads clips into memory a few hours ahead of playback. iPhones ignore video preload
- * hints, so streaming each clip when its hour starts spent half the hour loading.
- */
-function useClipCache(slots: Slot[], index: number) {
-  const [urls, setUrls] = useState<Record<string, string>>({});
-  const requested = useRef(new Set<string>());
-  const created = useRef<string[]>([]);
-
-  useEffect(() => {
-    for (const clip of slots.slice(index, index + LOOKAHEAD + 1).flatMap((s) => s.clips)) {
-      if (requested.current.has(clip.id)) continue;
-      requested.current.add(clip.id);
-      fetch(clip.url)
-        .then((res) => (res.ok ? res.blob() : Promise.reject(new Error(`HTTP ${res.status}`))))
-        .then((blob) => {
-          const url = URL.createObjectURL(blob);
-          created.current.push(url);
-          return url;
-        })
-        // If the download fails, stream it directly rather than skipping the clip.
-        .catch(() => clip.url)
-        .then((url) => setUrls((prev) => ({ ...prev, [clip.id]: url })));
-    }
-  }, [slots, index]);
-
-  useEffect(() => {
-    const list = created.current;
-    return () => list.forEach((u) => URL.revokeObjectURL(u));
-  }, []);
-
-  return urls;
 }
 
 function slotMs(slot: Slot) {
@@ -202,7 +169,9 @@ export function VlogPlayer({ slots, startIndex, title, backHref }: { slots: Slot
   const [startedIndex, setStartedIndex] = useState<number | null>(null);
   const gesture = useRef<Gesture | null>(null);
   const [stageRef, stage] = useBoxSize();
-  const urls = useClipCache(slots, index);
+  // Download this hour and the next ones ahead of time (shared with the group screen preview).
+  const wanted = useMemo(() => slots.slice(index, index + LOOKAHEAD + 1).flatMap((s) => s.clips), [slots, index]);
+  const urls = useClipUrls(wanted);
 
   const slot = slots[index];
   const duration = slot ? slotMs(slot) : 0;
@@ -215,6 +184,11 @@ export function VlogPlayer({ slots, startIndex, title, backHref }: { slots: Slot
     if (index + 1 >= slots.length) setEnded(true);
     else setIndex(index + 1);
   }, [index, slots.length]);
+
+  // The day is over: go back to the group screen (watching again is one tap on its preview).
+  useEffect(() => {
+    if (ended) router.replace(backHref);
+  }, [ended, router, backHref]);
 
   const prev = () => setIndex((i) => Math.max(0, i - 1));
 
@@ -276,8 +250,6 @@ export function VlogPlayer({ slots, startIndex, title, backHref }: { slots: Slot
     );
   }
 
-  const people = new Set(slots.flatMap((s) => s.clips.map((c) => c.userId))).size;
-  const clipCount = slots.reduce((n, s) => n + s.clips.length, 0);
 
   return (
     <div data-no-edge-swipe className="fixed inset-0 select-none overflow-hidden bg-black text-white">
@@ -322,28 +294,7 @@ export function VlogPlayer({ slots, startIndex, title, backHref }: { slots: Slot
         ) : null}
       </div>
 
-      {ended ? (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 bg-black p-8 text-center">
-          <p className="text-3xl font-bold">That&apos;s the day</p>
-          <p className="text-white/70">
-            {title} · {clipCount} clips from {people} {people === 1 ? "person" : "people"}
-          </p>
-          <div className="flex w-full max-w-xs flex-col gap-3">
-            <Button
-              onClick={() => {
-                setStartedIndex(null);
-                setIndex(0);
-                setEnded(false);
-              }}
-            >
-              Replay
-            </Button>
-            <Link href={backHref} className="py-2 text-white/70 underline underline-offset-4">
-              Back
-            </Link>
-          </div>
-        </div>
-      ) : (
+      {ended ? null : (
         <>
           <div className="safe-top pointer-events-none absolute inset-x-0 top-0 bg-gradient-to-b from-black/60 to-transparent px-3 pb-8">
             <div className="flex gap-1">
