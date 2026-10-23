@@ -37,7 +37,7 @@ export async function listMyGroups(userId: string) {
 export async function requireMember(groupId: string, userId: string) {
   const db = await getDb();
   const [row] = await db
-    .select({ group: groups, notify: memberships.notify })
+    .select({ group: groups, notify: memberships.notify, notifyPosts: memberships.notifyPosts })
     .from(memberships)
     .innerJoin(groups, eq(groups.id, memberships.groupId))
     .where(and(eq(memberships.groupId, groupId), eq(memberships.userId, userId)));
@@ -63,7 +63,7 @@ export async function listMembers(groupId: string) {
 
 /** Everything a group screen needs about the group, for a signed-in member. */
 export async function groupInfo(groupId: string, user: { id: string; name: string }) {
-  const { group, notify } = await requireMember(groupId, user.id);
+  const { group, notify, notifyPosts } = await requireMember(groupId, user.id);
   return {
     group: {
       id: group.id,
@@ -75,7 +75,7 @@ export async function groupInfo(groupId: string, user: { id: string; name: strin
       ownerId: group.ownerId,
     },
     members: (await listMembers(groupId)).map((m) => ({ id: m.id, name: m.name })),
-    me: { id: user.id, name: user.name, notify, isOwner: group.ownerId === user.id },
+    me: { id: user.id, name: user.name, notify, notifyPosts, isOwner: group.ownerId === user.id },
   };
 }
 

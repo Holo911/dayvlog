@@ -176,7 +176,7 @@ export type GroupInfo = {
     ownerId: string;
   };
   members: { id: string; name: string }[];
-  me: { id: string; name: string; notify: boolean; isOwner: boolean };
+  me: { id: string; name: string; notify: boolean; notifyPosts: boolean; isOwner: boolean };
 };
 
 export type DayClip = {

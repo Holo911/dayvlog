@@ -85,21 +85,35 @@ export default function GroupSettingsPage() {
         ) : null}
       </Card>
 
-      <Card className="flex items-center justify-between gap-4">
+      <Card className="flex flex-col gap-4">
         <div>
-          <p className="font-semibold">Drop notifications</p>
+          <p className="font-semibold">Notifications</p>
           <p className="text-sm text-muted">For this group, on all your devices.</p>
         </div>
-        <Toggle
-          label="Drop notifications"
-          checked={me.notify}
-          onChange={(notify) =>
-            run(async () => {
-              setData({ ...info, me: { ...me, notify } });
-              await api(`/api/groups/${id}/me`, { method: "PATCH", body: { notify } });
-            })
-          }
-        />
+        {(
+          [
+            { key: "notifyPosts", title: "When friends post", text: "Someone in the group just posted a clip." },
+            { key: "notify", title: "Hourly reminders", text: "A nudge at every drop hour to film your 2 seconds." },
+          ] as const
+        ).map((o) => (
+          <div key={o.key} className="flex items-center justify-between gap-4">
+            <div>
+              <p className="font-medium">{o.title}</p>
+              <p className="text-sm text-muted">{o.text}</p>
+            </div>
+            <Toggle
+              label={o.title}
+              checked={me[o.key]}
+              onChange={(on) =>
+                run(async () => {
+                  setData({ ...info, me: { ...me, [o.key]: on } });
+                  await api(`/api/groups/${id}/me`, { method: "PATCH", body: { [o.key]: on } });
+                })
+              }
+            />
+          </div>
+        ))}
+        <p className="text-xs text-muted">Both stay quiet outside the group&apos;s drop hours.</p>
       </Card>
 
       <Card>

@@ -1,9 +1,11 @@
 import { and, eq, ne } from "drizzle-orm";
+import { after } from "next/server";
 import { z } from "zod";
 import { requireUser } from "@/lib/auth";
 import { MAX_CLIP_BYTES, removeClips } from "@/lib/clips";
 import { getDb } from "@/lib/db";
 import { HttpError, json, readBody, route } from "@/lib/http";
+import { notifyPost } from "@/lib/postNotify";
 import { clips } from "@/lib/schema";
 import { storage } from "@/lib/storage";
 
@@ -15,7 +17,7 @@ const Body = z.object({
 const UPLOAD_GRACE_MS = 20 * 60_000;
 
 // Step 2 of posting: check the upload really landed, then publish it. A retake within
-// the same hour replaces the earlier clip.
+// the same hour replaces the earlier clip. A new post (not a retake) notifies the group.
 export const POST = route(async (req, ctx: RouteContext<"/api/clips/[id]/complete">) => {
   const { id } = await ctx.params;
   const user = await requireUser();
@@ -55,5 +57,12 @@ export const POST = route(async (req, ctx: RouteContext<"/api/clips/[id]/complet
     .update(clips)
     .set({ status: "ready", sizeBytes: object.size, durationMs: durationMs ?? null, caption: caption || null })
     .where(eq(clips.id, clip.id));
+
+  // Tell the others once the response is on its way, so posting doesn't wait for push delivery.
+  if (!previous.length) {
+    after(() =>
+      notifyPost({ ...clip, caption: caption || null }).catch((err) => console.error("post notification failed", err)),
+    );
+  }
   return json({ ok: true, day: clip.day, hour: clip.hour });
 });

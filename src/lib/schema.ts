@@ -71,7 +71,10 @@ export const memberships = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
+    // Hourly drop reminders for this member.
     notify: boolean("notify").notNull().default(true),
+    // A notification whenever someone else in the group posts a clip.
+    notifyPosts: boolean("notify_posts").notNull().default(true),
     joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.groupId, t.userId] }), index("memberships_user_idx").on(t.userId)],
